@@ -135,7 +135,7 @@ public sealed class DdcpService(DbFactory factory)
         PeriodoValido(anio, mes);
         using var workbook = new XLWorkbook();
         var sheet = workbook.AddWorksheet(CultureInfo.GetCultureInfo("es-MX").DateTimeFormat.GetMonthName(mes));
-        sheet.Cell(1, 1).Value = "INFORME DE DISPOSITIVOS DECOMISADOS Y PERSONAS PUESTAS A DISPOSICIÓN";
+        sheet.Cell(1, 1).Value = "INFORME DE PUESTA DE DISPOSITIVOS A DISPOSICIÓN";
         sheet.Range(1, 1, 1, 4).Merge();
         sheet.Cell(2, 1).Value = $"01 AL {DateTime.DaysInMonth(anio, mes)} DE {Meses[mes]} {anio}";
         sheet.Range(2, 1, 2, 4).Merge();
@@ -154,3 +154,4 @@ public sealed class DdcpService(DbFactory factory)
         return stream.ToArray();
     }
 }
+

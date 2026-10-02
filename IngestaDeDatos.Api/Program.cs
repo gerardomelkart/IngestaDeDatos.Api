@@ -30,12 +30,13 @@ app.Use(async (context, next) =>
         var status = ex is UnauthorizedAccessException ? 403 : ex is ArgumentException ? 400 : ex is SqlException sql && sql.Number is 2601 or 2627 ? 409 : 500;
         if (status == 500) app.Logger.LogError(ex, "Error de operación.");
         context.Response.StatusCode = status;
-        await context.Response.WriteAsJsonAsync(new { mensaje = status == 500 ? "No fue posible completar la operación. Revise el log de la API." : status == 409 ? "Ya existe un registro con esa clave. Actualice la vista y vuelva a intentar." : ex.Message });
+        await context.Response.WriteAsJsonAsync(new { mensaje = status == 500 ? "No fue posible completar la operación. Intente nuevamente o contacte al administrador del sistema." : status == 409 ? "Ya existe un registro con esa clave. Actualice la vista y vuelva a intentar." : ex.Message });
     }
 });
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapGet("/", () => new { sistema = "IngestaDeDatos.Api", estado = "OK" });
+app.MapGet("/", () => new { estado = "OK" });
 app.MapControllers();
 app.Run();
+
