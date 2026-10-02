@@ -9,31 +9,35 @@ using System.Text;
 namespace IngestaDeDatos.Api.Controllers;
 
 [ApiController, Route("api/auth")]
-public sealed class AuthController(UsuariosService usuarios, IConfiguration configuration) : ControllerBase
+public sealed class AuthController(UsuariosService usuarios, IConfiguration configuration, ILogger<AuthController> logger) : ControllerBase
 {
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Usuario) || string.IsNullOrEmpty(request.Password) || Encoding.UTF8.GetByteCount(request.Password) > 72)
         {
-            return Unauthorized(new { mensaje = "Usuario o contraseña incorrectos." }); 
+            logger.LogWarning("Inicio de sesión rechazado. Solicitud {RequestId}.", HttpContext.TraceIdentifier);
+            return Unauthorized(new { mensaje = "Usuario o contraseña incorrectos." });
         }
 
         var usuario = await usuarios.Buscar(request.Usuario.Trim());
         if (usuario is null || !BCrypt.Net.BCrypt.Verify(request.Password, usuario.PasswordHash))
-        { 
-            return Unauthorized(new { mensaje = "Usuario o contraseña incorrectos." }); 
+        {
+            logger.LogWarning("Inicio de sesión rechazado. Solicitud {RequestId}.", HttpContext.TraceIdentifier);
+            return Unauthorized(new { mensaje = "Usuario o contraseña incorrectos." });
         }
 
-        var claims = new[] 
+        var claims = new[]
         {
-            new Claim(ClaimTypes.NameIdentifier, usuario.IdUsuario.ToString()), new Claim(ClaimTypes.Name, usuario.Usuario), new Claim(ClaimTypes.Role, usuario.Rol) 
+            new Claim(ClaimTypes.NameIdentifier, usuario.IdUsuario.ToString()), new Claim(ClaimTypes.Name, usuario.Usuario), new Claim(ClaimTypes.Role, usuario.Rol)
         };
 
         var expires = DateTime.UtcNow.AddMinutes(configuration.GetValue<int>("Jwt:MinutesToExpire", 120));
         var credentials = new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["Jwt:SecretKey"]!)), SecurityAlgorithms.HmacSha256);
         var token = new JwtSecurityToken(configuration["Jwt:Issuer"], configuration["Jwt:Audience"], claims, expires: expires, signingCredentials: credentials);
 
+        logger.LogInformation("Inicio de sesión correcto. Solicitud {RequestId}; usuario {UserId}.", HttpContext.TraceIdentifier, usuario.IdUsuario);
         return Ok(new { token = new JwtSecurityTokenHandler().WriteToken(token), expira = expires, usuario = new { usuario.IdUsuario, usuario.Usuario, usuario.Nombre, usuario.Rol, usuario.EsNacional, usuario.IdEntidad } });
     }
 }
+
