@@ -32,31 +32,43 @@ public sealed class DdcpService(DbFactory factory)
         var registros = await db.QueryAsync<RegistroDdcp>(ConsultaSql, new { anio, mes, entidad });
         return registros.Where(x => incluirInactivos || x.Habilitado).OrderBy(x => x.Periodo).ThenBy(x => x.IdEntidad).ToList();
     }
+    private static IXLRow? BuscarEncabezado(IXLWorksheet sheet)
+    {
+        return sheet.RowsUsed().FirstOrDefault(row => Normalizar(row.Cell(2).GetString()) == "ENTIDAD FEDERATIVA");
+    }
+
+    private static bool EsFilaDeDatos(IXLRow row)
+    {
+        return Regex.IsMatch(row.Cell(1).GetString().Trim(), @"^\d+$") && !string.IsNullOrWhiteSpace(row.Cell(2).GetString());
+    }
+
     private static IXLWorksheet SeleccionarHoja(XLWorkbook workbook, int anio, int mes)
     {
-        var candidatas = new List<IXLWorksheet>();
-        foreach (var sheet in workbook.Worksheets)
-        {
-            var encabezado = sheet.RowsUsed().FirstOrDefault(r => Normalizar(r.Cell(2).GetString()) == "ENTIDAD FEDERATIVA");
-            if (encabezado is null)
-            {
-                continue;
-            }
-            var titulo = string.Join(" ", sheet.RowsUsed().Where(r => r.RowNumber() < encabezado.RowNumber()).SelectMany(r => r.CellsUsed()).Select(c => Normalizar(c.GetString())));
-            if (Regex.IsMatch(titulo, $@"\b{anio}\b") && Regex.IsMatch(titulo, $@"\b{Meses[mes]}\b"))
-            {
-                candidatas.Add(sheet);
-            }
-        }
+        var candidatas = workbook.Worksheets.Where(sheet => BuscarEncabezado(sheet) is not null || sheet.RowsUsed().Any(EsFilaDeDatos)).ToList();
         if (candidatas.Count == 0)
         {
-            throw new ArgumentException("No se encontró una hoja DDCP cuyo encabezado corresponda al año y mes seleccionados.");
+            throw new ArgumentException("No se encontró una tabla de datos. El archivo debe tener cuatro columnas: número, entidad, dispositivos y personas; puede incluir encabezados o comenzar directamente con los datos.");
         }
-        if (candidatas.Count > 1)
+        if (candidatas.Count == 1)
         {
-            throw new ArgumentException("El archivo contiene varias hojas para el periodo seleccionado. Deje una sola hoja para ese periodo y vuelva a cargarlo.");
+            return candidatas[0];
         }
-        return candidatas[0];
+
+        // En libros con varios meses, el título permite distinguir las tablas.
+        // Nunca se utiliza el nombre de la pestaña ni se exige un título para una tabla única.
+        var delPeriodo = candidatas.Where(sheet =>
+        {
+            var encabezado = BuscarEncabezado(sheet);
+            var primeraFila = encabezado?.RowNumber() ?? sheet.RowsUsed().First(EsFilaDeDatos).RowNumber();
+            var titulo = string.Join(" ", sheet.RowsUsed().Where(row => row.RowNumber() < primeraFila).SelectMany(row => row.CellsUsed()).Select(cell => Normalizar(cell.GetString())));
+            return Regex.IsMatch(titulo, $@"\b{anio}\b") && Regex.IsMatch(titulo, $@"\b{Meses[mes]}\b");
+        }).ToList();
+
+        if (delPeriodo.Count == 1)
+        {
+            return delPeriodo[0];
+        }
+        throw new ArgumentException("El archivo contiene varias tablas y no se puede identificar una sola para cargar. Deje únicamente la tabla que desea reportar. El nombre de la pestaña no importa; se usará el año y mes seleccionado en pantalla.");
     }
     public async Task<PreviaDdcp> Preparar(UsuarioInfo usuario, int anio, int mes, IFormFile archivo)
     {
@@ -69,18 +81,23 @@ public sealed class DdcpService(DbFactory factory)
         stream.Position = 0;
         using var workbook = Abrir(stream);
         var sheet = SeleccionarHoja(workbook, anio, mes);
-        var encabezado = sheet.RowsUsed().FirstOrDefault(r => Normalizar(r.Cell(2).GetString()) == "ENTIDAD FEDERATIVA") ?? throw new ArgumentException("No se encontró el encabezado: Núm., Entidad Federativa, Número de dispositivos decomisados, Personas puestas a disposición.");
-        if (Normalizar(encabezado.Cell(1).GetString()) != "NUM." || Normalizar(encabezado.Cell(3).GetString()) != "NUMERO DE DISPOSITIVOS DECOMISADOS" || Normalizar(encabezado.Cell(4).GetString()) != "PERSONAS PUESTAS A DISPOSICION") throw new ArgumentException("Los cuatro encabezados del archivo no corresponden a DDCP.");
-        var titulo = string.Join(" ", sheet.RowsUsed().Where(r => r.RowNumber() < encabezado.RowNumber()).SelectMany(r => r.CellsUsed()).Select(c => Normalizar(c.GetString())));
-        if (!Regex.IsMatch(titulo, $@"\b{anio}\b") || !Regex.IsMatch(titulo, $@"\b{Meses[mes]}\b")) throw new ArgumentException("El año y mes del encabezado no coinciden con el periodo seleccionado.");
+        var encabezado = BuscarEncabezado(sheet);
+        var primeraFila = encabezado is null ? sheet.RowsUsed().First(EsFilaDeDatos).RowNumber() : encabezado.RowNumber() + 1;
+        if (encabezado is not null)
+        {
+            if (Normalizar(encabezado.Cell(1).GetString()) != "NUM." || Normalizar(encabezado.Cell(3).GetString()) != "NUMERO DE DISPOSITIVOS DECOMISADOS" || Normalizar(encabezado.Cell(4).GetString()) != "PERSONAS PUESTAS A DISPOSICION")
+            {
+                throw new ArgumentException("Los cuatro encabezados del archivo no corresponden a DDCP.");
+            }
+        }
         var errores = new List<string>();
-        var advertencias = new List<string>();
+        var advertencias = new List<string> { $"La información se registrará en {Meses[mes].ToLowerInvariant()} de {anio}, conforme al periodo seleccionado en pantalla." };
         var filas = new List<FilaDdcp>();
         var ids = new HashSet<int>();
         var anteriores = (await Consultar(usuario, anio, mes, null, true)).ToDictionary(x => x.IdEntidad);
         decimal? totalDispositivos = null;
         decimal? totalPersonas = null;
-        foreach (var row in sheet.RowsUsed().Where(r => r.RowNumber() > encabezado.RowNumber()))
+        foreach (var row in sheet.RowsUsed().Where(r => r.RowNumber() >= primeraFila))
         {
             var textoPrimero = Normalizar(row.Cell(1).GetString());
             if (textoPrimero.StartsWith("TOTAL"))
@@ -141,7 +158,9 @@ public sealed class DdcpService(DbFactory factory)
             if (actual?.Revision != fila.RevisionAntes || actual?.Dispositivos.ToString("0", CultureInfo.InvariantCulture) != fila.DispositivosAntes || actual?.Personas != fila.PersonasAntes || actual?.Habilitado != fila.HabilitadoAntes) throw new ArgumentException("Los datos cambiaron después de la vista previa. Cancele esta carga y vuelva a validar el archivo.");
             var parametros = new { entidad = fila.IdEntidad, periodo = carga.Periodo, dispositivos = decimal.Parse(fila.Dispositivos, CultureInfo.InvariantCulture), personas = fila.Personas, nombre = fila.NombreEntidad, id, usuario = usuario.IdUsuario };
             if (actual is null)
+            {
                 await db.ExecuteAsync("INSERT dbo.DISPOSITIVOS_DECOMISADOS(ID_DISPOSITIVO_DECOMISADO, NOMBRE_ENTIDAD, NUM_DIS_DECOMISADOS, PERSONAS_P_DISPOSICION, FECHA_CREACION, HABILITADO, ID_ENTIDAD, PERIODO, FECHA_INGESTA, REVISION) VALUES (NEXT VALUE FOR dbo.SEQ_DECOMISO, @nombre, @dispositivos, @personas, GETDATE(), 1, @entidad, @periodo, SYSUTCDATETIME(), 1);", parametros, tx);
+            }
             else if (actual.Dispositivos != parametros.dispositivos || actual.Personas != fila.Personas || !actual.Habilitado)
             {
                 await db.ExecuteAsync("INSERT dbo.DDCP_HISTORICO(ID_DISPOSITIVO_DECOMISADO, ID_ENTIDAD, NOMBRE_ENTIDAD, PERIODO, NUM_DIS_DECOMISADOS, PERSONAS_P_DISPOSICION, REVISION, HABILITADO, FECHA_CREACION, FECHA_MODIFICACION, FECHA_INGESTA, ID_CARGA, ID_USUARIO) SELECT ID_DISPOSITIVO_DECOMISADO, ID_ENTIDAD, NOMBRE_ENTIDAD, PERIODO, NUM_DIS_DECOMISADOS, PERSONAS_P_DISPOSICION, REVISION, HABILITADO, FECHA_CREACION, FECHA_MODIFICACION, FECHA_INGESTA, @id, @usuario FROM dbo.DISPOSITIVOS_DECOMISADOS WHERE ID_ENTIDAD = @entidad AND PERIODO = @periodo;", parametros, tx);
@@ -180,4 +199,5 @@ public sealed class DdcpService(DbFactory factory)
         return stream.ToArray();
     }
 }
+
 
