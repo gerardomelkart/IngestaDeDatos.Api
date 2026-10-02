@@ -19,9 +19,14 @@ public sealed class DdcpController(UsuariosService usuarios, DdcpService ddcp) :
     [HttpGet("plantilla")]
     public async Task<IActionResult> Plantilla(int anio, int mes) => File(await ddcp.Plantilla(await usuarios.Actual(User, true), anio, mes), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"DDCP_{anio}_{mes:00}.xlsx");
     [HttpPost("cargas/validar"), RequestSizeLimit(11 * 1024 * 1024)]
-    public async Task<IActionResult> Validar([FromForm] int anio, [FromForm] int mes, [FromForm] string hoja, IFormFile archivo) => Ok(await ddcp.Preparar(await usuarios.Actual(User, true), anio, mes, hoja, archivo));
+    public async Task<IActionResult> Validar([FromForm] int anio, [FromForm] int mes, IFormFile archivo)
+    {
+        var usuario = await usuarios.Actual(User, true);
+        return Ok(await ddcp.Preparar(usuario, anio, mes, archivo));
+    }
     [HttpPost("cargas/{id:guid}/confirmar")]
     public async Task<IActionResult> Confirmar(Guid id) { await ddcp.Confirmar(await usuarios.Actual(User, true), id); return Ok(new { mensaje = "Carga confirmada. Los datos están disponibles para consulta." }); }
     [HttpPost("cargas/{id:guid}/cancelar")]
     public async Task<IActionResult> Cancelar(Guid id) { await ddcp.Cancelar(await usuarios.Actual(User, true), id); return Ok(new { mensaje = "Carga cancelada." }); }
 }
+

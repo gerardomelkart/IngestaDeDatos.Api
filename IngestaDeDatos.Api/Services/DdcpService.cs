@@ -32,7 +32,33 @@ public sealed class DdcpService(DbFactory factory)
         var registros = await db.QueryAsync<RegistroDdcp>(ConsultaSql, new { anio, mes, entidad });
         return registros.Where(x => incluirInactivos || x.Habilitado).OrderBy(x => x.Periodo).ThenBy(x => x.IdEntidad).ToList();
     }
-    public async Task<PreviaDdcp> Preparar(UsuarioInfo usuario, int anio, int mes, string hoja, IFormFile archivo)
+    private static IXLWorksheet SeleccionarHoja(XLWorkbook workbook, int anio, int mes)
+    {
+        var candidatas = new List<IXLWorksheet>();
+        foreach (var sheet in workbook.Worksheets)
+        {
+            var encabezado = sheet.RowsUsed().FirstOrDefault(r => Normalizar(r.Cell(2).GetString()) == "ENTIDAD FEDERATIVA");
+            if (encabezado is null)
+            {
+                continue;
+            }
+            var titulo = string.Join(" ", sheet.RowsUsed().Where(r => r.RowNumber() < encabezado.RowNumber()).SelectMany(r => r.CellsUsed()).Select(c => Normalizar(c.GetString())));
+            if (Regex.IsMatch(titulo, $@"\b{anio}\b") && Regex.IsMatch(titulo, $@"\b{Meses[mes]}\b"))
+            {
+                candidatas.Add(sheet);
+            }
+        }
+        if (candidatas.Count == 0)
+        {
+            throw new ArgumentException("No se encontró una hoja DDCP cuyo encabezado corresponda al año y mes seleccionados.");
+        }
+        if (candidatas.Count > 1)
+        {
+            throw new ArgumentException("El archivo contiene varias hojas para el periodo seleccionado. Deje una sola hoja para ese periodo y vuelva a cargarlo.");
+        }
+        return candidatas[0];
+    }
+    public async Task<PreviaDdcp> Preparar(UsuarioInfo usuario, int anio, int mes, IFormFile archivo)
     {
         PeriodoValido(anio, mes);
         if (archivo.Length == 0 || archivo.Length > 10 * 1024 * 1024 || !string.Equals(Path.GetExtension(archivo.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Suba un archivo .xlsx de hasta 10 MB.");
@@ -42,7 +68,7 @@ public sealed class DdcpService(DbFactory factory)
         await archivo.CopyToAsync(stream);
         stream.Position = 0;
         using var workbook = Abrir(stream);
-        var sheet = workbook.Worksheets.FirstOrDefault(x => string.Equals(x.Name, hoja, StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException("La hoja seleccionada no existe.");
+        var sheet = SeleccionarHoja(workbook, anio, mes);
         var encabezado = sheet.RowsUsed().FirstOrDefault(r => Normalizar(r.Cell(2).GetString()) == "ENTIDAD FEDERATIVA") ?? throw new ArgumentException("No se encontró el encabezado: Núm., Entidad Federativa, Número de dispositivos decomisados, Personas puestas a disposición.");
         if (Normalizar(encabezado.Cell(1).GetString()) != "NUM." || Normalizar(encabezado.Cell(3).GetString()) != "NUMERO DE DISPOSITIVOS DECOMISADOS" || Normalizar(encabezado.Cell(4).GetString()) != "PERSONAS PUESTAS A DISPOSICION") throw new ArgumentException("Los cuatro encabezados del archivo no corresponden a DDCP.");
         var titulo = string.Join(" ", sheet.RowsUsed().Where(r => r.RowNumber() < encabezado.RowNumber()).SelectMany(r => r.CellsUsed()).Select(c => Normalizar(c.GetString())));
