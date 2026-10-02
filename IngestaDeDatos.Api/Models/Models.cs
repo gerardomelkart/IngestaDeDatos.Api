@@ -2,6 +2,7 @@ namespace IngestaDeDatos.Api.Models;
 
 public record LoginRequest(string Usuario, string Password);
 public record UsuarioRequest(string Usuario, string Nombre, string Password, string Rol, bool EsNacional, int? IdEntidad);
+public record EstadoUsuarioRequest(bool Habilitado);
 public record Entidad(int IdEntidad, string NombreEntidad, string? NombreCorto);
 public sealed class UsuarioInfo
 {
@@ -12,6 +13,7 @@ public sealed class UsuarioInfo
     public string Rol { get; set; } = "";
     public bool EsNacional { get; set; }
     public int? IdEntidad { get; set; }
+    public bool Habilitado { get; set; }
 }
 public record FilaDdcp(int IdEntidad, string NombreEntidad, string Dispositivos, int Personas, string? DispositivosAntes, int? PersonasAntes, int? RevisionAntes, bool? HabilitadoAntes);
 public record PreviaDdcp(Guid IdCarga, int Anio, int Mes, List<FilaDdcp> Filas, List<string> Advertencias);
@@ -33,3 +35,4 @@ public sealed class CargaInfo
     public string Estado { get; set; } = "";
     public string FilasJson { get; set; } = "";
 }
+
