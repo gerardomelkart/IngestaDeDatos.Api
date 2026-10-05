@@ -32,6 +32,12 @@ public sealed class DdcpService(DbFactory factory)
         var registros = await db.QueryAsync<RegistroDdcp>(ConsultaSql, new { anio, mes, entidad });
         return registros.Where(x => incluirInactivos || x.Habilitado).OrderBy(x => x.Periodo).ThenBy(x => x.IdEntidad).ToList();
     }
+    public async Task<byte[]> ExportarConsulta(UsuarioInfo usuario, int anio, int? mes, int? entidad)
+    {
+        var filas = await Consultar(usuario, anio, mes, entidad);
+        var alcance = usuario.EsNacional ? entidad : usuario.IdEntidad;
+        return ExportacionDdcp.Generar(filas, anio, mes, alcance);
+    }
     private static IXLRow? BuscarEncabezado(IXLWorksheet sheet)
     {
         return sheet.RowsUsed().FirstOrDefault(row => Normalizar(row.Cell(2).GetString()) == "ENTIDAD FEDERATIVA");

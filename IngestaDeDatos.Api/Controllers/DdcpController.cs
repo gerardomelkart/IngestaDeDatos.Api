@@ -16,6 +16,13 @@ public sealed class DdcpController(UsuariosService usuarios, DdcpService ddcp) :
         var filas = await ddcp.Consultar(await usuarios.Actual(User), anio, mes, idEntidad);
         return Ok(new { filas = filas.Select(x => new { x.IdEntidad, x.NombreEntidad, anio = x.Periodo.Year, mes = x.Periodo.Month, dispositivos = x.Dispositivos.ToString("0", CultureInfo.InvariantCulture), x.Personas, x.Revision }), totalDispositivos = filas.Sum(x => x.Dispositivos).ToString("0", CultureInfo.InvariantCulture), totalPersonas = filas.Sum(x => (long)x.Personas) });
     }
+    [HttpGet("datos/excel")]
+    public async Task<IActionResult> Exportar(int anio, int? mes, int? idEntidad)
+    {
+        var usuario = await usuarios.Actual(User);
+        var contenido = await ddcp.ExportarConsulta(usuario, anio, mes, idEntidad);
+        return File(contenido, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"DDCP_consulta_{anio}.xlsx");
+    }
     [HttpGet("plantilla")]
     public async Task<IActionResult> Plantilla(int anio, int mes) => File(await ddcp.Plantilla(await usuarios.Actual(User, true), anio, mes), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"DDCP_{anio}_{mes:00}.xlsx");
     [HttpPost("cargas/validar"), RequestSizeLimit(11 * 1024 * 1024)]
