@@ -6,13 +6,15 @@ namespace IngestaDeDatos.Api.Services;
 
 public static class ExportacionDdcp
 {
+    private static readonly string[] Meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
     public static byte[] Generar(IReadOnlyCollection<RegistroDdcp> filas, int anio, int? mes, int? entidad)
     {
         using var libro = new XLWorkbook();
         var hoja = libro.AddWorksheet("Consulta DDCP");
         hoja.Cell(1, 1).Value = "Dispositivos decomisados centros penitenciarios";
         hoja.Range(1, 1, 1, 5).Merge();
-        var periodo = mes.HasValue ? $"Año: {anio} · Mes: {mes.Value:00}" : $"Año: {anio} · Todos los meses";
+        var periodo = mes.HasValue ? $"Año: {anio} · Mes: {Meses[mes.Value - 1]}" : $"Año: {anio} · Todos los meses";
         var alcance = entidad.HasValue ? $"Entidad: {filas.FirstOrDefault()?.NombreEntidad ?? entidad.Value.ToString(CultureInfo.InvariantCulture)}" : "Todas las entidades";
         hoja.Cell(2, 1).Value = $"{periodo} · {alcance}";
         hoja.Range(2, 1, 2, 5).Merge();
@@ -27,7 +29,7 @@ public static class ExportacionDdcp
         foreach (var fila in filas)
         {
             hoja.Cell(numeroFila, 1).Value = fila.Periodo.Year;
-            hoja.Cell(numeroFila, 2).Value = fila.Periodo.Month;
+            hoja.Cell(numeroFila, 2).Value = Meses[fila.Periodo.Month - 1];
             hoja.Cell(numeroFila, 3).Value = fila.NombreEntidad;
             Cantidad(hoja.Cell(numeroFila, 4), fila.Dispositivos);
             Cantidad(hoja.Cell(numeroFila, 5), fila.Personas);
@@ -44,7 +46,8 @@ public static class ExportacionDdcp
             rango.Style.Font.FontColor = XLColor.White;
             rango.Style.Fill.BackgroundColor = XLColor.FromHtml("#691C32");
         }
-        hoja.Columns(1, 2).Width = 10;
+        hoja.Column(1).Width = 10;
+        hoja.Column(2).Width = 16;
         hoja.Column(3).Width = 32;
         hoja.Columns(4, 5).Width = 27;
         hoja.Range(1, 1, numeroFila, 5).Style.Alignment.WrapText = true;
