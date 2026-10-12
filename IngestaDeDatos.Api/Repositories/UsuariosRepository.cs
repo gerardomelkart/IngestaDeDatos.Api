@@ -1,3 +1,4 @@
+using IngestaDeDatos.Api.Validators;
 using Dapper;
 using IngestaDeDatos.Api.Data;
 using IngestaDeDatos.Api.Models;
@@ -5,9 +6,9 @@ using System.Security.Claims;
 using System.Data;
 using Microsoft.Data.SqlClient;
 
-namespace IngestaDeDatos.Api.Services;
+namespace IngestaDeDatos.Api.Repositories;
 
-public sealed class UsuariosService(DbFactory factory)
+public sealed class UsuariosRepository(DbFactory factory) : IUsuariosRepository
 {
     private const string Columnas = "ID_USUARIO IdUsuario, USUARIO Usuario, NOMBRE Nombre, PASSWORD_HASH PasswordHash, ROL Rol, ES_NACIONAL EsNacional, ID_ENTIDAD IdEntidad, HABILITADO Habilitado";
     public async Task<UsuarioInfo?> Buscar(string usuario)
@@ -25,32 +26,9 @@ public sealed class UsuariosService(DbFactory factory)
         if (!await db.ExecuteScalarAsync<bool>("SELECT HABILITADO FROM dbo.ING_MODULO WHERE CLAVE = 'DDCP';")) throw new UnauthorizedAccessException("El módulo DDCP está deshabilitado.");
         return usuario;
     }
-    private static void Validar(UsuarioRequest request, bool nuevo)
-    {
-        if (string.IsNullOrWhiteSpace(request.Usuario) || request.Usuario.Trim().Length > 80 || string.IsNullOrWhiteSpace(request.Nombre) || request.Nombre.Trim().Length > 160)
-        {
-            throw new ArgumentException("Capture usuario (máximo 80 caracteres) y nombre (máximo 160).");
-        }
-        if ((nuevo || !string.IsNullOrEmpty(request.Password)) && (string.IsNullOrEmpty(request.Password) || request.Password.Length < 8 || System.Text.Encoding.UTF8.GetByteCount(request.Password) > 72))
-        {
-            throw new ArgumentException("La contraseña requiere al menos 8 caracteres y un máximo de 72 bytes.");
-        }
-        if (!new[] { "SUPER_USUARIO", "ENLACE_ESTATAL", "CONSULTA" }.Contains(request.Rol))
-        {
-            throw new ArgumentException("Rol inválido.");
-        }
-        if (request.Rol == "SUPER_USUARIO" && !request.EsNacional)
-        {
-            throw new ArgumentException("El superusuario siempre debe ser nacional.");
-        }
-        if (request.EsNacional == request.IdEntidad.HasValue)
-        {
-            throw new ArgumentException("El usuario nacional no lleva entidad; el usuario por entidad requiere una.");
-        }
-    }
     public async Task<int> Crear(UsuarioRequest request)
     {
-        Validar(request, true);
+        UsuarioValidator.Validar(request, true);
         await using var db = factory.Auth();
         await db.OpenAsync();
         await using var tx = await db.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -72,7 +50,7 @@ public sealed class UsuariosService(DbFactory factory)
     }
     public async Task Editar(int id, UsuarioRequest request, int actor)
     {
-        Validar(request, false);
+        UsuarioValidator.Validar(request, false);
         if (id == actor && request.Rol != "SUPER_USUARIO")
         {
             throw new ArgumentException("No puede quitarse su propio rol de superusuario.");
@@ -131,5 +109,16 @@ public sealed class UsuariosService(DbFactory factory)
         var password = Environment.GetEnvironmentVariable("INGESTA_ADMIN_PASSWORD") ?? throw new ArgumentException("Defina INGESTA_ADMIN_PASSWORD para crear el superusuario.");
         await Crear(new UsuarioRequest(nombre, "Administrador nacional", password, "SUPER_USUARIO", true, null));
     }
+    public async Task<List<UsuarioInfo>> Listar()
+    {
+        await using var db = factory.Auth();
+        return (await db.QueryAsync<UsuarioInfo>("SELECT ID_USUARIO IdUsuario, USUARIO Usuario, NOMBRE Nombre, ROL Rol, ES_NACIONAL EsNacional, ID_ENTIDAD IdEntidad, HABILITADO Habilitado FROM dbo.ING_USUARIO ORDER BY USUARIO;")).ToList();
+    }
+    public async Task<(List<UsuarioInfo> Usuarios, Dictionary<int, string> Entidades)> DatosExportacion()
+    {
+        await using var db = factory.Auth();
+        var lista = (await db.QueryAsync<UsuarioInfo>("SELECT ID_USUARIO IdUsuario, USUARIO Usuario, NOMBRE Nombre, ROL Rol, ES_NACIONAL EsNacional, ID_ENTIDAD IdEntidad, HABILITADO Habilitado FROM dbo.ING_USUARIO ORDER BY USUARIO;")).ToList();
+        var entidades = (await db.QueryAsync<Entidad>("SELECT ID_ENTIDAD IdEntidad, NOMBRE_ENTIDAD NombreEntidad, NOMBRE_CORTO NombreCorto FROM dbo.CAT_ENTIDAD;")).ToDictionary(x => x.IdEntidad, x => x.NombreEntidad);
+        return (lista, entidades);
+    }
 }
-

@@ -1,4 +1,4 @@
-namespace IngestaDeDatos.Api.Services;
+namespace IngestaDeDatos.Api.Repositories;
 
 // SQL parametrizado de DDCP. Se conserva el texto y el orden transaccional.
 internal static class DdcpSql

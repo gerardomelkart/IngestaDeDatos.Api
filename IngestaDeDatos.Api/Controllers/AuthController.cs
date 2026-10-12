@@ -40,4 +40,3 @@ public sealed class AuthController(UsuariosService usuarios, IConfiguration conf
         return Ok(new { token = new JwtSecurityTokenHandler().WriteToken(token), expira = expires, usuario = new { usuario.IdUsuario, usuario.Usuario, usuario.Nombre, usuario.Rol, usuario.EsNacional, usuario.IdEntidad } });
     }
 }
-

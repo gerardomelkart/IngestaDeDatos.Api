@@ -36,4 +36,3 @@ public sealed class DdcpController(UsuariosService usuarios, DdcpService ddcp) :
     [HttpPost("cargas/{id:guid}/cancelar")]
     public async Task<IActionResult> Cancelar(Guid id) { await ddcp.Cancelar(await usuarios.Actual(User, true), id); return Ok(new { mensaje = "Carga cancelada." }); }
 }
-

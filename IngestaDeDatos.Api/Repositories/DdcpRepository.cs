@@ -1,17 +1,30 @@
-using ClosedXML.Excel;
 using Dapper;
 using IngestaDeDatos.Api.Data;
 using IngestaDeDatos.Api.Models;
 using System.Data;
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
-namespace IngestaDeDatos.Api.Services;
+namespace IngestaDeDatos.Api.Repositories;
 
-public sealed partial class DdcpService
-{    public async Task Confirmar(UsuarioInfo usuario, Guid id)
+public sealed class DdcpRepository(DbFactory factory) : IDdcpRepository
+{
+    public async Task<List<Entidad>> Entidades(int? id)
+    {
+        await using var db = factory.Modulo("DDCP");
+        return (await db.QueryAsync<Entidad>(DdcpSql.ConsultarEntidades, new { id })).ToList();
+    }
+    public async Task<List<RegistroDdcp>> Consultar(int anio, int? mes, int? entidad)
+    {
+        await using var db = factory.Modulo("DDCP");
+        return (await db.QueryAsync<RegistroDdcp>(DdcpSql.ConsultarRegistros, new { anio, mes, entidad })).ToList();
+    }
+    public async Task CrearVistaPrevia(Guid id, int usuario, DateTime periodo, string nombre, byte[] bytes, string json)
+    {
+        await using var db = factory.Modulo("DDCP");
+        await db.ExecuteAsync(DdcpSql.CrearVistaPrevia, new { id, usuario, periodo, nombre, bytes, json });
+    }
+    public async Task Confirmar(UsuarioInfo usuario, Guid id)
     {
         await using var db = factory.Modulo("DDCP");
         await db.OpenAsync();
@@ -45,5 +58,4 @@ public sealed partial class DdcpService
         await using var db = factory.Modulo("DDCP");
         if (await db.ExecuteAsync(DdcpSql.CancelarCarga, new { id, usuario = usuario.IdUsuario }) != 1) throw new ArgumentException("La carga no existe, pertenece a otro usuario o ya terminó.");
     }
-
 }

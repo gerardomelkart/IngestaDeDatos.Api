@@ -1,6 +1,7 @@
 using IngestaDeDatos.Api.Data;
 using IngestaDeDatos.Api.Logging;
 using IngestaDeDatos.Api.Services;
+using IngestaDeDatos.Api.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
@@ -16,6 +17,8 @@ try
 {
     startup.LogInformation("Inicio del proceso. Entorno {Environment}; modo {Mode}.", builder.Environment.EnvironmentName, args.Contains("--crear-superusuario") ? "crear-superusuario" : "servidor");
     builder.Services.AddSingleton<DbFactory>();
+    builder.Services.AddScoped<IUsuariosRepository, UsuariosRepository>();
+    builder.Services.AddScoped<IDdcpRepository, DdcpRepository>();
     builder.Services.AddScoped<UsuariosService>();
     builder.Services.AddScoped<DdcpService>();
     builder.Services.AddControllers();
@@ -23,7 +26,7 @@ try
 
     if (args.Contains("--crear-superusuario"))
     {
-        await new UsuariosService(new DbFactory(builder.Configuration)).Bootstrap();
+        await new UsuariosService(new UsuariosRepository(new DbFactory(builder.Configuration))).Bootstrap();
         startup.LogInformation("Inicialización del superusuario completada.");
         Console.WriteLine("Superusuario creado correctamente.");
         return;

@@ -1,53 +1,37 @@
 using ClosedXML.Excel;
-using Dapper;
-using IngestaDeDatos.Api.Data;
 using IngestaDeDatos.Api.Models;
-using System.Data;
+using IngestaDeDatos.Api.Repositories;
+using IngestaDeDatos.Api.Validators;
+using static IngestaDeDatos.Api.Readers.DdcpArchivoReader;
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace IngestaDeDatos.Api.Services;
 
-public sealed partial class DdcpService
-{    private static IXLRow? BuscarEncabezado(IXLWorksheet sheet)
+public sealed class DdcpService(IDdcpRepository repository)
+{
+    private static readonly string[] Meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
+    public static void PeriodoValido(int anio, int? mes)
     {
-        return sheet.RowsUsed().FirstOrDefault(row => Normalizar(row.Cell(2).GetString()) == "ENTIDAD FEDERATIVA");
+        DdcpPeriodoValidator.Validar(anio, mes);
     }
-
-    private static bool EsFilaDeDatos(IXLRow row)
+    public async Task<List<Entidad>> Entidades(UsuarioInfo usuario)
     {
-        return Regex.IsMatch(row.Cell(1).GetString().Trim(), @"^\d+$") && !string.IsNullOrWhiteSpace(row.Cell(2).GetString());
+        return await repository.Entidades(usuario.EsNacional ? null : usuario.IdEntidad);
     }
-
-    private static IXLWorksheet SeleccionarHoja(XLWorkbook workbook, int anio, int mes)
+    public async Task<List<RegistroDdcp>> Consultar(UsuarioInfo usuario, int anio, int? mes, int? entidad, bool incluirInactivos = false)
     {
-        var candidatas = workbook.Worksheets.Where(sheet => BuscarEncabezado(sheet) is not null || sheet.RowsUsed().Any(EsFilaDeDatos)).ToList();
-        if (candidatas.Count == 0)
-        {
-            throw new ArgumentException("No se encontró una tabla de datos. El archivo debe tener cuatro columnas: número, entidad, dispositivos y personas; puede incluir encabezados o comenzar directamente con los datos.");
-        }
-        if (candidatas.Count == 1)
-        {
-            return candidatas[0];
-        }
-
-        // En libros con varios meses, el título permite distinguir las tablas.
-        // Nunca se utiliza el nombre de la pestaña ni se exige un título para una tabla única.
-        var delPeriodo = candidatas.Where(sheet =>
-        {
-            var encabezado = BuscarEncabezado(sheet);
-            var primeraFila = encabezado?.RowNumber() ?? sheet.RowsUsed().First(EsFilaDeDatos).RowNumber();
-            var titulo = string.Join(" ", sheet.RowsUsed().Where(row => row.RowNumber() < primeraFila).SelectMany(row => row.CellsUsed()).Select(cell => Normalizar(cell.GetString())));
-            return Regex.IsMatch(titulo, $@"\b{anio}\b") && Regex.IsMatch(titulo, $@"\b{Meses[mes]}\b");
-        }).ToList();
-
-        if (delPeriodo.Count == 1)
-        {
-            return delPeriodo[0];
-        }
-        throw new ArgumentException("El archivo contiene varias tablas y no se puede identificar una sola para cargar. Deje únicamente la tabla que desea reportar. El nombre de la pestaña no importa; se usará el año y mes seleccionado en pantalla.");
+        PeriodoValido(anio, mes);
+        if (!usuario.EsNacional && entidad.HasValue && entidad != usuario.IdEntidad) throw new UnauthorizedAccessException("No puede consultar otra entidad.");
+        entidad = usuario.EsNacional ? entidad : usuario.IdEntidad;
+        var registros = await repository.Consultar(anio, mes, entidad);
+        return registros.Where(x => incluirInactivos || x.Habilitado).OrderBy(x => x.Periodo).ThenBy(x => x.IdEntidad).ToList();
+    }
+    public async Task<byte[]> ExportarConsulta(UsuarioInfo usuario, int anio, int? mes, int? entidad)
+    {
+        var filas = await Consultar(usuario, anio, mes, entidad);
+        var alcance = usuario.EsNacional ? entidad : usuario.IdEntidad;
+        return ExportacionDdcp.Generar(filas, anio, mes, alcance);
     }
     public async Task<PreviaDdcp> Preparar(UsuarioInfo usuario, int anio, int mes, IFormFile archivo)
     {
@@ -103,22 +87,32 @@ public sealed partial class DdcpService
         if (totalPersonas.HasValue && totalPersonas != sumaPersonas) advertencias.Add($"El total de personas escrito ({totalPersonas}) difiere de la suma de filas ({sumaPersonas}). Se usará la suma de filas.");
         if (filas.Any(x => x.RevisionAntes.HasValue)) advertencias.Add("El periodo contiene registros existentes. La confirmación reemplaza sus cantidades, conserva histórico de los cambios y no vuelve a sumarlas.");
         var id = Guid.NewGuid();
-        await using var db = factory.Modulo("DDCP");
-        await db.ExecuteAsync(DdcpSql.CrearVistaPrevia, new { id, usuario = usuario.IdUsuario, periodo = new DateTime(anio, mes, 1), nombre = Path.GetFileName(archivo.FileName)[..Math.Min(Path.GetFileName(archivo.FileName).Length, 255)], bytes = stream.ToArray(), json = JsonSerializer.Serialize(filas) });
+        await repository.CrearVistaPrevia(id, usuario.IdUsuario, new DateTime(anio, mes, 1), Path.GetFileName(archivo.FileName)[..Math.Min(Path.GetFileName(archivo.FileName).Length, 255)], stream.ToArray(), JsonSerializer.Serialize(filas));
         return new PreviaDdcp(id, anio, mes, filas, advertencias);
     }
-    private static XLWorkbook Abrir(Stream stream)
+    public Task Confirmar(UsuarioInfo usuario, Guid id) => repository.Confirmar(usuario, id);
+    public Task Cancelar(UsuarioInfo usuario, Guid id) => repository.Cancelar(usuario, id);
+    public async Task<byte[]> Plantilla(UsuarioInfo usuario, int anio, int mes)
     {
-        try { return new XLWorkbook(stream); }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { throw new ArgumentException("No fue posible leer el Excel. Verifique que sea .xlsx válido y no esté protegido."); }
+        PeriodoValido(anio, mes);
+        using var workbook = new XLWorkbook();
+        var sheet = workbook.AddWorksheet(CultureInfo.GetCultureInfo("es-MX").DateTimeFormat.GetMonthName(mes));
+        sheet.Cell(1, 1).Value = "INFORME DE PUESTA DE DISPOSITIVOS A DISPOSICIÓN";
+        sheet.Range(1, 1, 1, 4).Merge();
+        sheet.Cell(2, 1).Value = $"01 AL {DateTime.DaysInMonth(anio, mes)} DE {Meses[mes]} {anio}";
+        sheet.Range(2, 1, 2, 4).Merge();
+        string[] columnas = ["Núm.", "Entidad Federativa", "Número de dispositivos decomisados", "Personas puestas a disposición"];
+        for (var c = 0; c < columnas.Length; c++) sheet.Cell(4, c + 1).Value = columnas[c];
+        var entidades = await Entidades(usuario);
+        for (var i = 0; i < entidades.Count; i++) { sheet.Cell(i + 5, 1).Value = i + 1; sheet.Cell(i + 5, 2).Value = entidades[i].NombreEntidad; }
+        sheet.Columns(1, 4).Width = 28;
+        sheet.Column(2).Width = 30;
+        sheet.Row(1).Height = 36;
+        sheet.Row(4).Height = 36;
+        sheet.Range(1, 1, entidades.Count + 4, 4).Style.Alignment.WrapText = true;
+        sheet.Range(4, 1, 4, 4).Style.Font.Bold = true;
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
     }
-    private static bool Numero(IXLCell cell, out decimal numero)
-    {
-        numero = 0;
-        if (cell.HasFormula) return false;
-        var texto = cell.GetString().Trim();
-        return Regex.IsMatch(texto, @"^\d+$") && decimal.TryParse(texto, NumberStyles.None, CultureInfo.InvariantCulture, out numero) && numero >= 0;
-    }
-    private static string Normalizar(string value) => new string(value.Trim().Normalize(NormalizationForm.FormD).Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray()).Normalize(NormalizationForm.FormC).ToUpperInvariant();
-
 }

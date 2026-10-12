@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 using IngestaDeDatos.Api.Models;
 using System.Globalization;
 
