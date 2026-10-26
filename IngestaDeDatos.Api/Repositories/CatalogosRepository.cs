@@ -16,7 +16,7 @@ public sealed class CatalogosRepository(DbFactory factory, IConfiguration config
     public async Task<List<MesCatalogo>> Meses()
     {
         await using var db = factory.Modulo(Modulo);
-        var meses = (await db.QueryAsync<MesCatalogo>("SELECT ID_MES IdMes, NOMBRE Nombre FROM dbo.CAT_MES ORDER BY ID_MES;")).ToList();
+        var meses = (await db.QueryAsync<MesCatalogo>("SELECT CAST(ID_MES AS int) IdMes, NOMBRE Nombre FROM dbo.CAT_MES ORDER BY ID_MES;")).ToList();
         if (!meses.Select(x => x.IdMes).SequenceEqual(Enumerable.Range(1, 12)) || meses.Any(x => string.IsNullOrWhiteSpace(x.Nombre)))
             throw new InvalidOperationException("El catálogo CAT_MES debe contener los doce meses del calendario.");
         return meses;
