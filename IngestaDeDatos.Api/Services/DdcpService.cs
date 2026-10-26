@@ -29,11 +29,13 @@ public sealed class DdcpService(IDdcpRepository repository, ICatalogosRepository
         var registros = await repository.Consultar(anio, mes, entidad);
         return registros.Where(x => incluirInactivos || x.Habilitado).OrderBy(x => x.Periodo).ThenBy(x => x.IdEntidad).ToList();
     }
-    public async Task<byte[]> ExportarConsulta(UsuarioInfo usuario, int anio, int? mes, int? entidad)
+    public async Task<byte[]> ExportarConsulta(UsuarioInfo usuario, int anio, int? mes, int? entidad, FiltrosTablaDdcp? filtros = null)
     {
         var filas = await Consultar(usuario, anio, mes, entidad);
         var alcance = usuario.EsNacional ? entidad : usuario.IdEntidad;
-        return ExportacionDdcp.Generar(filas, anio, mes, alcance, await catalogos.Meses(), await catalogos.NombreModulo());
+        var meses = await catalogos.Meses();
+        var visibles = TablaConsultaDdcp.Aplicar(filas, meses, filtros ?? new FiltrosTablaDdcp());
+        return ExportacionDdcp.Generar(visibles, anio, mes, alcance, meses, await catalogos.NombreModulo());
     }
     public async Task<PreviaDdcp> Preparar(UsuarioInfo usuario, int anio, int mes, IFormFile archivo)
     {

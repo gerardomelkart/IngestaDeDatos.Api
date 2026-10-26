@@ -1,4 +1,5 @@
 using IngestaDeDatos.Api.Services;
+using IngestaDeDatos.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Globalization;
@@ -17,10 +18,10 @@ public sealed class DdcpController(UsuariosService usuarios, DdcpService ddcp) :
         return Ok(new { filas = filas.Select(x => new { x.IdEntidad, x.NombreEntidad, anio = x.Periodo.Year, mes = x.Periodo.Month, dispositivos = x.Dispositivos.ToString("0", CultureInfo.InvariantCulture), x.Personas, x.Revision }), totalDispositivos = filas.Sum(x => x.Dispositivos).ToString("0", CultureInfo.InvariantCulture), totalPersonas = filas.Sum(x => (long)x.Personas) });
     }
     [HttpGet("datos/excel")]
-    public async Task<IActionResult> Exportar(int anio, int? mes, int? idEntidad)
+    public async Task<IActionResult> Exportar(int anio, int? mes, int? idEntidad, [FromQuery] FiltrosTablaDdcp filtros)
     {
         var usuario = await usuarios.Actual(User);
-        var contenido = await ddcp.ExportarConsulta(usuario, anio, mes, idEntidad);
+        var contenido = await ddcp.ExportarConsulta(usuario, anio, mes, idEntidad, filtros);
         return File(contenido, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"DDCP_consulta_{anio}.xlsx");
     }
     [HttpGet("plantilla")]

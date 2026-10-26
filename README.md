@@ -46,3 +46,7 @@ Se conserva el archivo externo configurado en `deploy.env`. La instalación exis
 Las reglas no secretas del paquete pueden sobrescribirse en el archivo externo o con variables de entorno, por ejemplo `Reglas__MaxArchivoBytes`. Después de cambiar configuración se reinicia el servicio; después de cambiar datos de catálogo basta recargar las pantallas para obtener las etiquetas actualizadas. Las autorizaciones del servidor consultan los permisos vigentes en BD en cada operación.
 
 Los perfiles y las instrucciones de publicación se encuentran en `DDCP.Front/publicacion`. Los scripts conservan conexiones, clave JWT y opciones productivas al validar una instalación existente.
+
+## Consulta y exportación 1.0
+
+`GET api/ddcp/datos/excel` admite los parámetros opcionales `filtroAnio`, `filtroMes`, `filtroEntidad`, `filtroDispositivos`, `filtroPersonas`, `orden` y `ascendente`, además del periodo y entidad existentes. La búsqueda es parcial y sin distinguir acentos; el mes usa su nombre del catálogo. El orden admite `anio`, `mes`, `entidad`, `dispositivos` o `personas`. Primero se obtiene la información dentro del alcance autorizado y después se aplican los filtros. Las cantidades y los totales mantienen su precisión. No requiere migración de la base.
