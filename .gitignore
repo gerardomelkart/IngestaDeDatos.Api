@@ -4,3 +4,14 @@ obj/
 *.user
 appsettings.*.local.json
 logs/
+
+
+appsettings.Production.json
+appsettings.Development.json
+appsettings.*.local.json
+**/secrets.json
+.env
+*.env
+*.pfx
+*.key
+*.pem

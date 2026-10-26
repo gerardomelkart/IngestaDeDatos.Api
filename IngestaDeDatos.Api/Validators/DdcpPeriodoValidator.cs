@@ -1,9 +1,12 @@
+using IngestaDeDatos.Api.Configuration;
+
 namespace IngestaDeDatos.Api.Validators;
 
 public static class DdcpPeriodoValidator
 {
-    public static void Validar(int anio, int? mes)
+    public static void Validar(int anio, int? mes, ReglasDdcpOptions reglas)
     {
-        if (anio < 2000 || anio > 2100 || mes.HasValue && (mes < 1 || mes > 12)) throw new ArgumentException("Periodo inválido: año 2000 a 2100 y mes 1 a 12.");
+        if (anio < reglas.AnioMinimo || anio > reglas.AnioMaximo || mes.HasValue && (mes < 1 || mes > 12)) throw new ArgumentException($"Periodo inválido: año {reglas.AnioMinimo} a {reglas.AnioMaximo} y un mes del calendario.");
     }
 }
+

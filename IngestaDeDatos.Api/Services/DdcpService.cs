@@ -1,3 +1,5 @@
+using IngestaDeDatos.Api.Configuration;
+using Microsoft.Extensions.Options;
 using ClosedXML.Excel;
 using IngestaDeDatos.Api.Models;
 using IngestaDeDatos.Api.Repositories;
@@ -8,12 +10,12 @@ using System.Text.Json;
 
 namespace IngestaDeDatos.Api.Services;
 
-public sealed class DdcpService(IDdcpRepository repository)
+public sealed class DdcpService(IDdcpRepository repository, ICatalogosRepository catalogos, IOptions<ReglasDdcpOptions> opciones)
 {
-    private static readonly string[] Meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
-    public static void PeriodoValido(int anio, int? mes)
+    private ReglasDdcpOptions Reglas => opciones.Value;
+    public void PeriodoValido(int anio, int? mes)
     {
-        DdcpPeriodoValidator.Validar(anio, mes);
+        DdcpPeriodoValidator.Validar(anio, mes, Reglas);
     }
     public async Task<List<Entidad>> Entidades(UsuarioInfo usuario)
     {
@@ -31,19 +33,20 @@ public sealed class DdcpService(IDdcpRepository repository)
     {
         var filas = await Consultar(usuario, anio, mes, entidad);
         var alcance = usuario.EsNacional ? entidad : usuario.IdEntidad;
-        return ExportacionDdcp.Generar(filas, anio, mes, alcance);
+        return ExportacionDdcp.Generar(filas, anio, mes, alcance, await catalogos.Meses(), await catalogos.NombreModulo());
     }
     public async Task<PreviaDdcp> Preparar(UsuarioInfo usuario, int anio, int mes, IFormFile archivo)
     {
         PeriodoValido(anio, mes);
-        if (archivo.Length == 0 || archivo.Length > 10 * 1024 * 1024 || !string.Equals(Path.GetExtension(archivo.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Suba un archivo .xlsx de hasta 10 MB.");
+        if (archivo.Length == 0 || archivo.Length > Reglas.MaxArchivoBytes || !string.Equals(Path.GetExtension(archivo.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException($"Suba un archivo .xlsx de hasta {Reglas.MaxArchivoBytes / 1024m / 1024m:0.##} MB.");
         var entidades = await Entidades(usuario);
+        var meses = await catalogos.Meses();
         var porNombre = entidades.ToDictionary(x => Normalizar(x.NombreEntidad));
         using var stream = new MemoryStream();
         await archivo.CopyToAsync(stream);
         stream.Position = 0;
         using var workbook = Abrir(stream);
-        var sheet = SeleccionarHoja(workbook, anio, mes);
+        var sheet = SeleccionarHoja(workbook, anio, mes, meses);
         var encabezado = BuscarEncabezado(sheet);
         var primeraFila = encabezado is null ? sheet.RowsUsed().First(EsFilaDeDatos).RowNumber() : encabezado.RowNumber() + 1;
         if (encabezado is not null)
@@ -54,7 +57,7 @@ public sealed class DdcpService(IDdcpRepository repository)
             }
         }
         var errores = new List<string>();
-        var advertencias = new List<string> { $"La información se registrará en {Meses[mes].ToLowerInvariant()} de {anio}, conforme al periodo seleccionado en pantalla." };
+        var advertencias = new List<string> { $"La información se registrará en {meses.Single(x => x.IdMes == mes).Nombre.ToLowerInvariant()} de {anio}, conforme al periodo seleccionado en pantalla." };
         var filas = new List<FilaDdcp>();
         var ids = new HashSet<int>();
         var anteriores = (await Consultar(usuario, anio, mes, null, true)).ToDictionary(x => x.IdEntidad);
@@ -74,8 +77,8 @@ public sealed class DdcpService(IDdcpRepository repository)
             if (string.IsNullOrWhiteSpace(nombre)) { errores.Add($"Fila {row.RowNumber()}: falta la entidad o hay una fila de datos sin identificar."); continue; }
             if (!porNombre.TryGetValue(Normalizar(nombre), out var entidad)) { errores.Add($"Fila {row.RowNumber()}: entidad desconocida o fuera de su alcance: {nombre}."); continue; }
             if (!ids.Add(entidad.IdEntidad)) { errores.Add($"Fila {row.RowNumber()}: entidad repetida: {nombre}."); continue; }
-            if (!Numero(row.Cell(3), out var dispositivos) || dispositivos > 999999999999999999m) { errores.Add($"Fila {row.RowNumber()}: dispositivos debe ser un entero no negativo de hasta 18 dígitos, sin notas ni fórmulas."); continue; }
-            if (!Numero(row.Cell(4), out var personas) || personas > int.MaxValue) { errores.Add($"Fila {row.RowNumber()}: personas debe ser un entero no negativo hasta {int.MaxValue}, sin notas ni fórmulas."); continue; }
+            if (!Numero(row.Cell(3), out var dispositivos) || dispositivos > Reglas.MaxDispositivos) { errores.Add($"Fila {row.RowNumber()}: dispositivos debe ser un entero no negativo hasta {Reglas.MaxDispositivos:0}, sin notas ni fórmulas."); continue; }
+            if (!Numero(row.Cell(4), out var personas) || personas > Reglas.MaxPersonas) { errores.Add($"Fila {row.RowNumber()}: personas debe ser un entero no negativo hasta {Reglas.MaxPersonas}, sin notas ni fórmulas."); continue; }
             anteriores.TryGetValue(entidad.IdEntidad, out var antes);
             filas.Add(new FilaDdcp(entidad.IdEntidad, entidad.NombreEntidad, dispositivos.ToString("0", CultureInfo.InvariantCulture), (int)personas, antes?.Dispositivos.ToString("0", CultureInfo.InvariantCulture), antes?.Personas, antes?.Revision, antes?.Habilitado));
         }
@@ -95,11 +98,12 @@ public sealed class DdcpService(IDdcpRepository repository)
     public async Task<byte[]> Plantilla(UsuarioInfo usuario, int anio, int mes)
     {
         PeriodoValido(anio, mes);
+        var meses = await catalogos.Meses();
         using var workbook = new XLWorkbook();
-        var sheet = workbook.AddWorksheet(CultureInfo.GetCultureInfo("es-MX").DateTimeFormat.GetMonthName(mes));
-        sheet.Cell(1, 1).Value = "INFORME DE PUESTA DE DISPOSITIVOS A DISPOSICIÓN";
+        var sheet = workbook.AddWorksheet((await catalogos.Meses()).Single(x => x.IdMes == mes).Nombre);
+        sheet.Cell(1, 1).Value = await catalogos.NombreModulo();
         sheet.Range(1, 1, 1, 4).Merge();
-        sheet.Cell(2, 1).Value = $"01 AL {DateTime.DaysInMonth(anio, mes)} DE {Meses[mes]} {anio}";
+        sheet.Cell(2, 1).Value = $"01 AL {DateTime.DaysInMonth(anio, mes)} DE {meses.Single(x => x.IdMes == mes).Nombre.ToUpperInvariant()} {anio}";
         sheet.Range(2, 1, 2, 4).Merge();
         string[] columnas = ["Núm.", "Entidad Federativa", "Número de dispositivos decomisados", "Personas puestas a disposición"];
         for (var c = 0; c < columnas.Length; c++) sheet.Cell(4, c + 1).Value = columnas[c];
@@ -116,3 +120,4 @@ public sealed class DdcpService(IDdcpRepository repository)
         return stream.ToArray();
     }
 }
+

@@ -18,10 +18,11 @@ public sealed class FileLogProvider : ILoggerProvider
 
     public FileLogProvider(IConfiguration configuration, string contentRoot)
     {
-        var configuredDirectory = configuration["Logs:Directory"] ?? "logs";
+        var configuredDirectory = configuration["Logs:Directory"] ?? throw new InvalidOperationException("Falta Logs:Directory.");
         directory = Path.GetFullPath(configuredDirectory, contentRoot);
-        maximumBytes = Math.Clamp(configuration.GetValue<long>("Logs:MaxFileSizeMB", 10), 1, 100) * 1024 * 1024;
-        retentionDays = Math.Clamp(configuration.GetValue<int>("Logs:RetentionDays", 30), 1, 365);
+        maximumBytes = configuration.GetValue<long>("Logs:MaxFileSizeMB") * 1024 * 1024;
+        retentionDays = configuration.GetValue<int>("Logs:RetentionDays");
+        if (maximumBytes <= 0 || retentionDays <= 0) throw new InvalidOperationException("Configure tamaño y retención de logs positivos.");
         Directory.CreateDirectory(directory);
         // Verifica escritura al arrancar, antes de aceptar solicitudes.
         var probe = Path.Combine(directory, $".write-test-{Guid.NewGuid():N}");
@@ -149,3 +150,4 @@ public sealed class FileLogProvider : ILoggerProvider
         }
     }
 }
+

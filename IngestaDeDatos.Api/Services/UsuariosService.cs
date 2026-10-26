@@ -28,7 +28,7 @@ public sealed class UsuariosService(IUsuariosRepository repository)
         {
             sheet.Cell(fila, 1).Value = usuario.Nombre;
             sheet.Cell(fila, 2).Value = usuario.Usuario;
-            sheet.Cell(fila, 3).Value = usuario.Rol;
+            sheet.Cell(fila, 3).Value = usuario.NombreRol;
             sheet.Cell(fila, 4).Value = usuario.EsNacional ? "Nacional" : "Por entidad";
             sheet.Cell(fila, 5).Value = usuario.EsNacional ? "Todas" : entidades.GetValueOrDefault(usuario.IdEntidad ?? 0, "Entidad asignada");
             sheet.Cell(fila, 6).Value = usuario.Habilitado ? "Activo" : "Inactivo";
@@ -41,3 +41,4 @@ public sealed class UsuariosService(IUsuariosRepository repository)
         return stream.ToArray();
     }
 }
+

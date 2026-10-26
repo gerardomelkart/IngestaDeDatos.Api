@@ -1,26 +1,24 @@
+using IngestaDeDatos.Api.Configuration;
+
 using IngestaDeDatos.Api.Models;
 
 namespace IngestaDeDatos.Api.Validators;
 
 public static class UsuarioValidator
 {
-    public static void Validar(UsuarioRequest request, bool nuevo)
+    public static void Validar(UsuarioRequest request, bool nuevo, ReglasDdcpOptions reglas, RolCatalogo rol)
     {
-        if (string.IsNullOrWhiteSpace(request.Usuario) || request.Usuario.Trim().Length > 80 || string.IsNullOrWhiteSpace(request.Nombre) || request.Nombre.Trim().Length > 160)
+        if (string.IsNullOrWhiteSpace(request.Usuario) || request.Usuario.Trim().Length > reglas.UsuarioMaximo || string.IsNullOrWhiteSpace(request.Nombre) || request.Nombre.Trim().Length > reglas.NombreMaximo)
         {
-            throw new ArgumentException("Capture usuario (máximo 80 caracteres) y nombre (máximo 160).");
+            throw new ArgumentException($"Capture usuario (máximo {reglas.UsuarioMaximo} caracteres) y nombre (máximo {reglas.NombreMaximo}).");
         }
-        if ((nuevo || !string.IsNullOrEmpty(request.Password)) && (string.IsNullOrEmpty(request.Password) || request.Password.Length < 8 || System.Text.Encoding.UTF8.GetByteCount(request.Password) > 72))
+        if ((nuevo || !string.IsNullOrEmpty(request.Password)) && (string.IsNullOrEmpty(request.Password) || request.Password.Length < reglas.PasswordMinimo || System.Text.Encoding.UTF8.GetByteCount(request.Password) > reglas.PasswordMaximoBytes))
         {
-            throw new ArgumentException("La contraseña requiere al menos 8 caracteres y un máximo de 72 bytes.");
+            throw new ArgumentException($"La contraseña requiere al menos {reglas.PasswordMinimo} caracteres y un máximo de {reglas.PasswordMaximoBytes} bytes.");
         }
-        if (!new[] { "SUPER_USUARIO", "ENLACE_ESTATAL", "CONSULTA" }.Contains(request.Rol))
+        if (rol.NacionalObligatorio && !request.EsNacional)
         {
-            throw new ArgumentException("Rol inválido.");
-        }
-        if (request.Rol == "SUPER_USUARIO" && !request.EsNacional)
-        {
-            throw new ArgumentException("El superusuario siempre debe ser nacional.");
+            throw new ArgumentException("El rol seleccionado requiere alcance nacional.");
         }
         if (request.EsNacional == request.IdEntidad.HasValue)
         {
@@ -28,3 +26,4 @@ public static class UsuarioValidator
         }
     }
 }
+

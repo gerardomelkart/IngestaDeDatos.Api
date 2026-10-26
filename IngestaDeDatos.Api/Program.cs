@@ -1,3 +1,5 @@
+using IngestaDeDatos.Api.Configuration;
+using Microsoft.AspNetCore.Http.Features;
 using IngestaDeDatos.Api.Data;
 using IngestaDeDatos.Api.Logging;
 using IngestaDeDatos.Api.Services;
@@ -16,7 +18,12 @@ var startup = startupFactory.CreateLogger("IngestaDeDatos.Api.Arranque");
 try
 {
     startup.LogInformation("Inicio del proceso. Entorno {Environment}; modo {Mode}.", builder.Environment.EnvironmentName, args.Contains("--crear-superusuario") ? "crear-superusuario" : "servidor");
+    builder.Services.AddOptions<ReglasDdcpOptions>().Bind(builder.Configuration.GetRequiredSection("Reglas")).ValidateDataAnnotations().Validate(x => x.EsValida(), "Reglas incompatibles con el esquema de DDCP.").ValidateOnStart();
+    var reglas = builder.Configuration.GetRequiredSection("Reglas").Get<ReglasDdcpOptions>()!;
+    builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = reglas.MaxArchivoBytes + reglas.MargenMultipartBytes);
+    builder.Services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = reglas.MaxArchivoBytes + reglas.MargenMultipartBytes);
     builder.Services.AddSingleton<DbFactory>();
+    builder.Services.AddScoped<ICatalogosRepository, CatalogosRepository>();
     builder.Services.AddScoped<IUsuariosRepository, UsuariosRepository>();
     builder.Services.AddScoped<IDdcpRepository, DdcpRepository>();
     builder.Services.AddScoped<UsuariosService>();
@@ -26,7 +33,9 @@ try
 
     if (args.Contains("--crear-superusuario"))
     {
-        await new UsuariosService(new UsuariosRepository(new DbFactory(builder.Configuration))).Bootstrap();
+        await using var bootstrap = builder.Build();
+        using var scope = bootstrap.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<UsuariosService>().Bootstrap();
         startup.LogInformation("Inicialización del superusuario completada.");
         Console.WriteLine("Superusuario creado correctamente.");
         return;
@@ -37,7 +46,7 @@ try
     {
         throw new InvalidOperationException("Defina Jwt:SecretKey con al menos 32 bytes mediante user-secrets o variable Jwt__SecretKey.");
     }
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options => options.TokenValidationParameters = new TokenValidationParameters { ValidateIssuer = true, ValidateAudience = true, ValidateLifetime = true, ValidateIssuerSigningKey = true, ValidIssuer = builder.Configuration["Jwt:Issuer"], ValidAudience = builder.Configuration["Jwt:Audience"], IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)), ClockSkew = TimeSpan.FromSeconds(30) });
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options => options.TokenValidationParameters = new TokenValidationParameters { ValidateIssuer = true, ValidateAudience = true, ValidateLifetime = true, ValidateIssuerSigningKey = true, ValidIssuer = builder.Configuration["Jwt:Issuer"], ValidAudience = builder.Configuration["Jwt:Audience"], IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret)), ClockSkew = TimeSpan.FromSeconds(builder.Configuration.GetValue<int>("Jwt:ClockSkewSeconds")) });
     builder.Services.AddAuthorization();
 
     await using var app = builder.Build();
@@ -60,3 +69,4 @@ catch (Exception exception)
     Environment.ExitCode = 1;
     Console.Error.WriteLine("No fue posible iniciar o completar el proceso. Revise los logs y la configuración.");
 }
+

@@ -7,26 +7,26 @@ using System.Text.Json;
 
 namespace IngestaDeDatos.Api.Repositories;
 
-public sealed class DdcpRepository(DbFactory factory) : IDdcpRepository
+public sealed class DdcpRepository(DbFactory factory, ICatalogosRepository catalogos) : IDdcpRepository
 {
     public async Task<List<Entidad>> Entidades(int? id)
     {
-        await using var db = factory.Modulo("DDCP");
+        await using var db = factory.Modulo(catalogos.Modulo);
         return (await db.QueryAsync<Entidad>(DdcpSql.ConsultarEntidades, new { id })).ToList();
     }
     public async Task<List<RegistroDdcp>> Consultar(int anio, int? mes, int? entidad)
     {
-        await using var db = factory.Modulo("DDCP");
+        await using var db = factory.Modulo(catalogos.Modulo);
         return (await db.QueryAsync<RegistroDdcp>(DdcpSql.ConsultarRegistros, new { anio, mes, entidad })).ToList();
     }
     public async Task CrearVistaPrevia(Guid id, int usuario, DateTime periodo, string nombre, byte[] bytes, string json)
     {
-        await using var db = factory.Modulo("DDCP");
+        await using var db = factory.Modulo(catalogos.Modulo);
         await db.ExecuteAsync(DdcpSql.CrearVistaPrevia, new { id, usuario, periodo, nombre, bytes, json });
     }
     public async Task Confirmar(UsuarioInfo usuario, Guid id)
     {
-        await using var db = factory.Modulo("DDCP");
+        await using var db = factory.Modulo(catalogos.Modulo);
         await db.OpenAsync();
         await using var tx = await db.BeginTransactionAsync(IsolationLevel.Serializable);
         var carga = await db.QuerySingleOrDefaultAsync<CargaInfo>(DdcpSql.ObtenerCargaParaConfirmar, new { id }, tx) ?? throw new ArgumentException("La carga no existe.");
@@ -55,7 +55,8 @@ public sealed class DdcpRepository(DbFactory factory) : IDdcpRepository
     }
     public async Task Cancelar(UsuarioInfo usuario, Guid id)
     {
-        await using var db = factory.Modulo("DDCP");
+        await using var db = factory.Modulo(catalogos.Modulo);
         if (await db.ExecuteAsync(DdcpSql.CancelarCarga, new { id, usuario = usuario.IdUsuario }) != 1) throw new ArgumentException("La carga no existe, pertenece a otro usuario o ya terminó.");
     }
 }
+

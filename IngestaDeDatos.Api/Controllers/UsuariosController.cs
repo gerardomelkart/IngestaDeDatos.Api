@@ -11,21 +11,21 @@ public sealed class UsuariosController(UsuariosService usuarios) : ControllerBas
     [HttpGet]
     public async Task<IActionResult> Listar()
     {
-        if ((await usuarios.Actual(User)).Rol != "SUPER_USUARIO") throw new UnauthorizedAccessException();
+        if (!(await usuarios.Actual(User)).PuedeAdministrarUsuarios) throw new UnauthorizedAccessException();
         var lista = await usuarios.Listar();
-        return Ok(lista.Select(x => new { x.IdUsuario, x.Usuario, x.Nombre, x.Rol, x.EsNacional, x.IdEntidad, x.Habilitado }));
+        return Ok(lista.Select(x => new { x.IdUsuario, x.Usuario, x.Nombre, x.Rol, x.EsNacional, x.IdEntidad, x.Habilitado, x.PuedeCargar, x.PuedeAdministrarUsuarios }));
     }
     [HttpPost]
     public async Task<IActionResult> Crear(UsuarioRequest request)
     {
-        if ((await usuarios.Actual(User)).Rol != "SUPER_USUARIO") throw new UnauthorizedAccessException();
+        if (!(await usuarios.Actual(User)).PuedeAdministrarUsuarios) throw new UnauthorizedAccessException();
         return Ok(new { idUsuario = await usuarios.Crear(request) });
     }
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Editar(int id, UsuarioRequest request)
     {
         var actor = await usuarios.Actual(User);
-        if (actor.Rol != "SUPER_USUARIO")
+        if (!actor.PuedeAdministrarUsuarios)
         {
             throw new UnauthorizedAccessException();
         }
@@ -36,7 +36,7 @@ public sealed class UsuariosController(UsuariosService usuarios) : ControllerBas
     public async Task<IActionResult> Estado(int id, EstadoUsuarioRequest request)
     {
         var actor = await usuarios.Actual(User);
-        if (actor.Rol != "SUPER_USUARIO")
+        if (!actor.PuedeAdministrarUsuarios)
         {
             throw new UnauthorizedAccessException();
         }
@@ -46,10 +46,11 @@ public sealed class UsuariosController(UsuariosService usuarios) : ControllerBas
     [HttpGet("exportar")]
     public async Task<IActionResult> Exportar()
     {
-        if ((await usuarios.Actual(User)).Rol != "SUPER_USUARIO")
+        if (!(await usuarios.Actual(User)).PuedeAdministrarUsuarios)
         {
             throw new UnauthorizedAccessException();
         }
         return File(await usuarios.Exportar(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DDCP_usuarios.xlsx");
     }
 }
+

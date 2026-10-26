@@ -6,15 +6,14 @@ namespace IngestaDeDatos.Api.Services;
 
 public static class ExportacionDdcp
 {
-    private static readonly string[] Meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-    public static byte[] Generar(IReadOnlyCollection<RegistroDdcp> filas, int anio, int? mes, int? entidad)
+    public static byte[] Generar(IReadOnlyCollection<RegistroDdcp> filas, int anio, int? mes, int? entidad, IReadOnlyCollection<MesCatalogo> meses, string nombreModulo)
     {
         using var libro = new XLWorkbook();
         var hoja = libro.AddWorksheet("Consulta DDCP");
-        hoja.Cell(1, 1).Value = "Dispositivos decomisados centros penitenciarios";
+        hoja.Cell(1, 1).Value = nombreModulo;
         hoja.Range(1, 1, 1, 5).Merge();
-        var periodo = mes.HasValue ? $"Año: {anio} · Mes: {Meses[mes.Value - 1]}" : $"Año: {anio} · Todos los meses";
+        var periodo = mes.HasValue ? $"Año: {anio} · Mes: {meses.Single(x => x.IdMes == mes.Value).Nombre}" : $"Año: {anio} · Todos los meses";
         var alcance = entidad.HasValue ? $"Entidad: {filas.FirstOrDefault()?.NombreEntidad ?? entidad.Value.ToString(CultureInfo.InvariantCulture)}" : "Todas las entidades";
         hoja.Cell(2, 1).Value = $"{periodo} · {alcance}";
         hoja.Range(2, 1, 2, 5).Merge();
@@ -29,7 +28,7 @@ public static class ExportacionDdcp
         foreach (var fila in filas)
         {
             hoja.Cell(numeroFila, 1).Value = fila.Periodo.Year;
-            hoja.Cell(numeroFila, 2).Value = Meses[fila.Periodo.Month - 1];
+            hoja.Cell(numeroFila, 2).Value = meses.Single(x => x.IdMes == fila.Periodo.Month).Nombre;
             hoja.Cell(numeroFila, 3).Value = fila.NombreEntidad;
             Cantidad(hoja.Cell(numeroFila, 4), fila.Dispositivos);
             Cantidad(hoja.Cell(numeroFila, 5), fila.Personas);
@@ -78,3 +77,4 @@ public static class ExportacionDdcp
         }
     }
 }
+

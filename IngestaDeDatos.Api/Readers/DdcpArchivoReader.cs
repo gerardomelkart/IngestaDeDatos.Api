@@ -1,3 +1,4 @@
+using IngestaDeDatos.Api.Models;
 using ClosedXML.Excel;
 using System.Globalization;
 using System.Text;
@@ -7,7 +8,6 @@ namespace IngestaDeDatos.Api.Readers;
 
     public static class DdcpArchivoReader
 {
-    private static readonly string[] Meses = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
     public static IXLRow? BuscarEncabezado(IXLWorksheet sheet)
     {
         return sheet.RowsUsed().FirstOrDefault(row => Normalizar(row.Cell(2).GetString()) == "ENTIDAD FEDERATIVA");
@@ -18,7 +18,7 @@ namespace IngestaDeDatos.Api.Readers;
         return Regex.IsMatch(row.Cell(1).GetString().Trim(), @"^\d+$") && !string.IsNullOrWhiteSpace(row.Cell(2).GetString());
     }
 
-    public static IXLWorksheet SeleccionarHoja(XLWorkbook workbook, int anio, int mes)
+    public static IXLWorksheet SeleccionarHoja(XLWorkbook workbook, int anio, int mes, IReadOnlyCollection<MesCatalogo> meses)
     {
         var candidatas = workbook.Worksheets.Where(sheet => BuscarEncabezado(sheet) is not null || sheet.RowsUsed().Any(EsFilaDeDatos)).ToList();
         if (candidatas.Count == 0)
@@ -37,7 +37,7 @@ namespace IngestaDeDatos.Api.Readers;
             var encabezado = BuscarEncabezado(sheet);
             var primeraFila = encabezado?.RowNumber() ?? sheet.RowsUsed().First(EsFilaDeDatos).RowNumber();
             var titulo = string.Join(" ", sheet.RowsUsed().Where(row => row.RowNumber() < primeraFila).SelectMany(row => row.CellsUsed()).Select(cell => Normalizar(cell.GetString())));
-            return Regex.IsMatch(titulo, $@"\b{anio}\b") && Regex.IsMatch(titulo, $@"\b{Meses[mes]}\b");
+            return Regex.IsMatch(titulo, $@"\b{anio}\b") && Regex.IsMatch(titulo, $@"\b{Regex.Escape(Normalizar(meses.Single(x => x.IdMes == mes).Nombre))}\b");
         }).ToList();
 
         if (delPeriodo.Count == 1)
@@ -61,3 +61,4 @@ namespace IngestaDeDatos.Api.Readers;
     }
     public static string Normalizar(string value) => new string(value.Trim().Normalize(NormalizationForm.FormD).Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray()).Normalize(NormalizationForm.FormC).ToUpperInvariant();
 }
+

@@ -25,7 +25,7 @@ public sealed class DdcpController(UsuariosService usuarios, DdcpService ddcp) :
     }
     [HttpGet("plantilla")]
     public async Task<IActionResult> Plantilla(int anio, int mes) => File(await ddcp.Plantilla(await usuarios.Actual(User, true), anio, mes), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"DDCP_{anio}_{mes:00}.xlsx");
-    [HttpPost("cargas/validar"), RequestSizeLimit(11 * 1024 * 1024)]
+    [HttpPost("cargas/validar")]
     public async Task<IActionResult> Validar([FromForm] int anio, [FromForm] int mes, IFormFile archivo)
     {
         var usuario = await usuarios.Actual(User, true);
@@ -36,3 +36,4 @@ public sealed class DdcpController(UsuariosService usuarios, DdcpService ddcp) :
     [HttpPost("cargas/{id:guid}/cancelar")]
     public async Task<IActionResult> Cancelar(Guid id) { await ddcp.Cancelar(await usuarios.Actual(User, true), id); return Ok(new { mensaje = "Carga cancelada." }); }
 }
+
