@@ -1,4 +1,50 @@
-# Ingesta de Datos API
+# DDCP · API de ingesta y consulta
+
+DDCP es una aplicación web para recibir, validar y consultar reportes mensuales de **dispositivos decomisados en centros penitenciarios** y personas puestas a disposición. Permite trabajar con alcance nacional o por entidad, según los permisos de la cuenta.
+
+## Repositorios del proyecto
+
+La solución se mantiene en tres repositorios complementarios:
+
+| Repositorio | Responsabilidad | Tecnologías |
+| --- | --- | --- |
+| [DDCP.Front](https://github.com/gerardomelkart/DDCP.Front) | Interfaz, navegación, consulta y carga de archivos. | Angular, TypeScript, HTML y CSS |
+| [IngestaDeDatos.Api](https://github.com/gerardomelkart/IngestaDeDatos.Api) | Autenticación, autorización, validación, confirmación de cargas y exportación. | ASP.NET Core, C#, Dapper y ClosedXML |
+| [DDCP.BD](https://github.com/gerardomelkart/DDCP.BD) | Estructura SQL, catálogos, historial y scripts de mantenimiento. | SQL Server y T-SQL |
+
+## Cómo se conectan
+
+El navegador ejecuta el Front, que consume la API mediante HTTP y JSON. La API valida la sesión y el alcance del usuario antes de leer o modificar SQL Server. **El Front no se conecta directamente a la base de datos.**
+
+Los catálogos de entidades, roles, permisos y meses se consultan desde la base a través de la API. Las conexiones y claves se configuran por ambiente, fuera del código versionado.
+
+## Flujo de trabajo
+
+1. El usuario inicia sesión y recibe las opciones disponibles para su rol y entidad.
+2. Selecciona el periodo y carga un archivo Excel; el nombre de la hoja no determina su validez.
+3. La API valida estructura, entidades y cantidades y devuelve una vista previa.
+4. El usuario revisa y confirma. Si el periodo ya tenía información, se reemplazan las cantidades afectadas y se conserva su histórico.
+5. Los datos confirmados se consultan por periodo y entidad y se pueden exportar a Excel.
+
+## Desarrollo
+
+Proyecto desarrollado por **[Gerardo Melkart Noeller Álvarez](https://github.com/gerardomelkart)**. Integra desarrollo de interfaz, servicios de backend, modelado de datos, procesamiento de Excel y automatización de publicación en Linux.
+
+## Qué contiene este repositorio
+
+- Autenticación con JWT y contraseñas protegidas con BCrypt.
+- Autorización por permisos vigentes y alcance nacional o por entidad.
+- Lectura y validación de Excel, generación de plantillas y exportación de consultas.
+- Confirmación de cargas con histórico y control de cambios posteriores a la vista previa.
+- Consulta de catálogos y reglas no secretas para el Front.
+- Registro de solicitudes, inicios de sesión y errores.
+- Separación por controladores, servicios, repositorios, modelos, lectores y validadores.
+
+## Ejecutar la solución
+
+Se necesita .NET 10 y acceso a SQL Server con el esquema y los permisos descritos en [DDCP.BD](https://github.com/gerardomelkart/DDCP.BD#readme). Configurar las conexiones y la clave JWT con secretos de usuario o variables de entorno siguiendo las instrucciones de este README. Después iniciar la API y configurar [DDCP.Front](https://github.com/gerardomelkart/DDCP.Front#readme) para consumirla.
+
+## Documentación técnica
 
 ASP.NET Core (`net10.0`), organizado en `Controllers`, `Services`, `Repositories`, `Models`, `Readers`, `Validators`, `Configuration`, `Data` y `Logging`.
 
