@@ -54,7 +54,10 @@ using (var cniedt = new XLWorkbook(new MemoryStream(ExportacionesFese.Cniedt(dat
 var pdf = ExportacionesFese.Acuse(new CargaFese { IdCarga = Guid.NewGuid(), Entidad = "Entidad ficticia", Periodo = new(2026, 9, 1), Tipo = "INICIAL", Usuario = "Prueba", NombreArchivo = "formato-ficticio.xlsx", FechaCreacion = RepositorioFese.Ahora() }, [new("Centro ficticio",10101,12)], [], catalogo, false);
 Assert(System.Text.Encoding.Latin1.GetString(pdf).StartsWith("%PDF-1.4"), "Genera acuse PDF");
 Assert(System.Text.Encoding.Latin1.GetString(pdf).Contains("Comparativo contra el mes anterior"), "El comprobante sigue el formato mensual institucional");
-Assert(System.Text.Encoding.Latin1.GetString(pdf).Contains("Este documento no acredita una entrega aceptada"), "La vista previa no certifica recepción");
+var textoPrevio = System.Text.Encoding.Latin1.GetString(pdf);
+Assert(textoPrevio.Contains("(PREVIO) Tj") && textoPrevio.Contains("0.81915 0.57358 -0.57358 0.81915"), "La vista previa lleva marca de agua diagonal como SIIID");
+Assert(!textoPrevio.Contains("VISTA PREVIA -") && !textoPrevio.Contains("Este documento no acredita"), "El aviso previo no se inserta en el párrafo");
+Assert(!textoPrevio.Contains("Folio:") && !textoPrevio.Contains("Usuario de carga:"), "El comprobante no muestra folio ni usuario");
 var enero = new DateTime(2027, 1, 4);
 Assert(PoliticaEntregaFese.Corte(enero) == new DateTime(2026, 12, 1), "El corte de enero corresponde a diciembre del año anterior");
 PoliticaEntregaFese.Validar(new(2026, 12, 1), false, false, enero);
@@ -73,7 +76,7 @@ var filasAcuse = catalogoAcuse.Select((c, i) => new FilaFese("Centro de prueba",
 var previasAcuse = catalogoAcuse.Select((c, i) => new DatoFese { Codigo = c.Codigo, Categoria = c.Categoria, Total = 2000 + i * 100 }).ToList();
 var cargaAcuse = new CargaFese { IdCarga = Guid.NewGuid(), Entidad = "Entidad de prueba", Periodo = new(2026, 10, 1), Tipo = "INICIAL", Usuario = "prueba", FechaCreacion = new(2026, 11, 4, 10, 0, 0, TimeSpan.FromHours(-6)) };
 var definitivo = ExportacionesFese.Acuse(cargaAcuse, filasAcuse, previasAcuse, catalogoAcuse, true, cargaAcuse.FechaCreacion);
-Assert(System.Text.Encoding.Latin1.GetString(definitivo).Contains("certifica") && !System.Text.Encoding.Latin1.GetString(definitivo).Contains("PENDIENTE DE ACEPTACIÓN"), "Solo el definitivo certifica la entrega");
+Assert(System.Text.Encoding.Latin1.GetString(definitivo).Contains("certifica") && !System.Text.Encoding.Latin1.GetString(definitivo).Contains("(PREVIO) Tj"), "Solo el definitivo certifica la entrega");
 Assert(System.Text.Encoding.Latin1.GetString(definitivo).Contains("0 0 1 rg"), "El comprobante resalta variaciones significativas en azul");
 File.WriteAllBytes(Path.Combine(qa, "comprobante.pdf"), definitivo);
 cargaAcuse.Advertencias = System.Text.Json.JsonSerializer.Serialize(Enumerable.Range(1, 80).Select(i => $"Centro de prueba {i}: revise la variación reportada respecto del mes anterior."));

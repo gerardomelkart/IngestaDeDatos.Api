@@ -12,22 +12,22 @@ internal sealed class AcuseFese
     private readonly List<StringBuilder> paginas = [];
     private StringBuilder contenido = new();
     private double y;
+    private bool previo;
     private const double Izquierda = 54;
     private const double Derecha = 558;
     private const string Azul = "0 0 1";
 
     public static byte[] Crear(CargaFese carga, List<FilaFese> filas, List<DatoFese> anteriores, List<IncidenteFese> catalogo, bool aceptado, DateTimeOffset fecha)
     {
-        var doc = new AcuseFese();
+        var doc = new AcuseFese { previo = !aceptado };
         doc.NuevaPagina();
         doc.Texto($"{fecha.Day} de {ExportacionesFese.Mes(fecha.Month)} de {fecha.Year}, CDMX", Derecha, 698, 10, derecha: true);
         doc.y = 648;
         var periodo = $"{ExportacionesFese.Mes(carga.Periodo.Month)} de {carga.Periodo.Year}";
         var texto = aceptado
             ? $"El Centro Nacional de Información y Desarrollo Tecnológico emite el presente documento que certifica la entrega de información por parte de la entidad federativa de {carga.Entidad}, para el reporte estadístico mensual de la cantidad de llamadas recibidas en el servicio de atención de emergencias 9-1-1 correspondiente al mes de {periodo}."
-            : $"VISTA PREVIA - PENDIENTE DE ACEPTACIÓN. Información presentada por la entidad federativa de {carga.Entidad} para el reporte estadístico mensual de llamadas recibidas en el servicio de atención de emergencias 9-1-1 correspondiente al mes de {periodo}. ";
+            : $"Información presentada por la entidad federativa de {carga.Entidad} para el reporte estadístico mensual de llamadas recibidas en el servicio de atención de emergencias 9-1-1 correspondiente al mes de {periodo}. ";
         doc.Parrafo(texto, 11, 15);
-        if (!aceptado) doc.Parrafo("Este documento no acredita una entrega aceptada.", 10, 14);
         doc.y -= 30;
         doc.Parrafo("Comparativo contra el mes anterior:", 11, 15);
         doc.y -= 14;
@@ -60,9 +60,6 @@ internal sealed class AcuseFese
         doc.y -= 22;
         var advertencias = JsonSerializer.Deserialize<List<string>>(carga.Advertencias) ?? [];
         doc.Parrafo("Observaciones: " + (advertencias.Count == 0 ? "Sin observaciones." : string.Join(" ", advertencias)), 10, 14);
-        doc.y -= 17;
-        doc.Parrafo($"Folio: {carga.IdCarga} | {(carga.Tipo == "ACTUALIZACION" ? "Actualización" : "Entrega inicial")}", 8, 11);
-        doc.Parrafo($"Usuario de carga: {carga.Usuario}", 8, 11);
         return doc.Generar();
     }
 
@@ -81,7 +78,15 @@ internal sealed class AcuseFese
     private void NuevaPagina()
     {
         if (contenido.Length > 0) paginas.Add(contenido);
-        contenido = new StringBuilder("q 308 0 0 49.49 250 738 cm /Logo Do Q\n");
+        contenido = new StringBuilder();
+        if (previo)
+        {
+            // Mismo criterio de SIIID: PREVIO, rojo tenue, 72 pt y giro de 35°.
+            var centroY = paginas.Count == 0 ? 316 : 341;
+            var inicio = -Ancho("PREVIO", 72) / 2;
+            contenido.Append(FormattableString.Invariant($"q 0.81915 0.57358 -0.57358 0.81915 306 {centroY} cm 1 0.8 0.8 rg BT /F2 72 Tf {inicio:0.##} 0 Td (PREVIO) Tj ET Q\n"));
+        }
+        contenido.Append("q 308 0 0 49.49 250 738 cm /Logo Do Q\n");
         Texto("Comprobante", Izquierda, 735, 12);
         Linea(728);
         y = 695;
