@@ -53,10 +53,31 @@ using (var cniedt = new XLWorkbook(new MemoryStream(ExportacionesFese.Cniedt(dat
 }
 var pdf = ExportacionesFese.Acuse(new CargaFese { IdCarga = Guid.NewGuid(), Entidad = "Entidad ficticia", Periodo = new(2026, 9, 1), Tipo = "INICIAL", Usuario = "Prueba", NombreArchivo = "formato-ficticio.xlsx", FechaCreacion = RepositorioFese.Ahora() }, [new("Centro ficticio",10101,12)], [], catalogo, false);
 Assert(System.Text.Encoding.Latin1.GetString(pdf).StartsWith("%PDF-1.4"), "Genera acuse PDF");
+Assert(System.Text.Encoding.Latin1.GetString(pdf).Contains("Comparativo contra el mes anterior"), "El comprobante sigue el formato mensual institucional");
+Assert(System.Text.Encoding.Latin1.GetString(pdf).Contains("Este documento no acredita una entrega aceptada"), "La vista previa no certifica recepción");
+var enero = new DateTime(2027, 1, 4);
+Assert(PoliticaEntregaFese.Corte(enero) == new DateTime(2026, 12, 1), "El corte de enero corresponde a diciembre del año anterior");
+PoliticaEntregaFese.Validar(new(2026, 12, 1), false, false, enero);
+PoliticaEntregaFese.Validar(new(2026, 9, 1), true, true, enero);
+Rechaza(() => PoliticaEntregaFese.Validar(new(2026, 11, 1), false, false, enero), "Una carga inicial no admite otro corte");
+Rechaza(() => PoliticaEntregaFese.Validar(new(2026, 12, 1), false, true, enero), "Una entrega existente se envía por Actualizaciones");
+Rechaza(() => PoliticaEntregaFese.Validar(new(2026, 9, 1), true, false, enero), "Una actualización necesita entrega aceptada");
+Rechaza(() => PoliticaEntregaFese.Validar(new(2027, 1, 1), true, true, enero), "Las actualizaciones no admiten meses sin cerrar");
 var qa = Path.Combine(Path.GetTempPath(), "fese-test-exports");
 Directory.CreateDirectory(qa);
 File.WriteAllBytes(Path.Combine(qa, "acuse.pdf"), pdf);
 File.WriteAllBytes(Path.Combine(qa, "cniedt.xlsx"), ExportacionesFese.Cniedt(datos, cargas, entidades, 2026));
+var categoriasAcuse = new[] { "MÉDICO", "PROTECCIÓN CIVIL", "SEGURIDAD", "SERVICIOS PÚBLICOS", "ASISTENCIA", "OTROS SERVICIOS", "IMPROCEDENTES" };
+var catalogoAcuse = categoriasAcuse.Select((c, i) => new IncidenteFese { Codigo = (i + 1) * 10000, Categoria = c, Procedente = i < 6 }).ToList();
+var filasAcuse = catalogoAcuse.Select((c, i) => new FilaFese("Centro de prueba", c.Codigo, 1000 + i * 100)).ToList();
+var previasAcuse = catalogoAcuse.Select((c, i) => new DatoFese { Codigo = c.Codigo, Categoria = c.Categoria, Total = 2000 + i * 100 }).ToList();
+var cargaAcuse = new CargaFese { IdCarga = Guid.NewGuid(), Entidad = "Entidad de prueba", Periodo = new(2026, 10, 1), Tipo = "INICIAL", Usuario = "prueba", FechaCreacion = new(2026, 11, 4, 10, 0, 0, TimeSpan.FromHours(-6)) };
+var definitivo = ExportacionesFese.Acuse(cargaAcuse, filasAcuse, previasAcuse, catalogoAcuse, true, cargaAcuse.FechaCreacion);
+Assert(System.Text.Encoding.Latin1.GetString(definitivo).Contains("certifica") && !System.Text.Encoding.Latin1.GetString(definitivo).Contains("PENDIENTE DE ACEPTACIÓN"), "Solo el definitivo certifica la entrega");
+Assert(System.Text.Encoding.Latin1.GetString(definitivo).Contains("0 0 1 rg"), "El comprobante resalta variaciones significativas en azul");
+File.WriteAllBytes(Path.Combine(qa, "comprobante.pdf"), definitivo);
+cargaAcuse.Advertencias = System.Text.Json.JsonSerializer.Serialize(Enumerable.Range(1, 80).Select(i => $"Centro de prueba {i}: revise la variación reportada respecto del mes anterior."));
+File.WriteAllBytes(Path.Combine(qa, "observaciones-largas.pdf"), ExportacionesFese.Acuse(cargaAcuse, filasAcuse, [], catalogoAcuse, false));
 var formato = Environment.GetEnvironmentVariable("FESE_TEST_FORMATO");
 var rutaCatalogo = Environment.GetEnvironmentVariable("FESE_TEST_CATALOGO");
 if (formato is not null && rutaCatalogo is not null)
@@ -83,6 +104,13 @@ using (var dev = new DbFactory(config, new EntornoPrueba("Development")).Modulo(
 try { using var incorrecta = new DbFactory(config, new EntornoPrueba("Production")).Modulo("FESE"); throw new Exception("Producción aceptó base DEV"); }
 catch (InvalidOperationException) { Console.WriteLine("OK: Producción rechaza una conexión a FESE_DEV"); }
 Console.WriteLine("Pruebas correctas");
+
+static void Rechaza(Action accion, string mensaje)
+{
+    try { accion(); }
+    catch (ArgumentException) { Console.WriteLine("OK: " + mensaje); return; }
+    throw new Exception(mensaje);
+}
 
 static void Assert(bool valor, string mensaje)
 {

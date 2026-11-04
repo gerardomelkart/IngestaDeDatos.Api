@@ -51,17 +51,19 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, DbFa
         await using var db = factory.Auth();
         var roles = await db.QueryAsync("SELECT CLAVE clave, NOMBRE nombre, NACIONAL_OBLIGATORIO nacionalObligatorio FROM dbo.CAT_ROL WHERE HABILITADO = 1 ORDER BY ORDEN");
         var meses = await db.QueryAsync("SELECT ID_MES id, NOMBRE nombre FROM dbo.CAT_MES ORDER BY ID_MES");
-        return Ok(new { usuario, entidades = (await repo.Entidades()).Where(e => usuario.EsNacional || e.IdEntidad == usuario.IdEntidad), incidentes = await repo.Catalogo(), roles, meses });
+        var corte = PoliticaEntregaFese.Corte(RepositorioFese.Ahora().Date);
+        return Ok(new { corte = new { anio = corte.Year, mes = corte.Month }, usuario, entidades = (await repo.Entidades()).Where(e => usuario.EsNacional || e.IdEntidad == usuario.IdEntidad), incidentes = await repo.Catalogo(), roles, meses });
     }
     [HttpPost("cargas/validar")]
-    public async Task<IActionResult> Validar([FromForm] IFormFile archivo, [FromForm] int idEntidad, [FromForm] int anio, [FromForm] int mes)
+    public async Task<IActionResult> Validar([FromForm] IFormFile archivo, [FromForm] int idEntidad, [FromForm] int anio, [FromForm] int mes, [FromForm] bool actualizacion = false)
     {
         var usuario = await acceso.Actual(User, true);
         var entidad = AccesoFese.Entidad(usuario, idEntidad);
         Anio(anio);
         if (mes is < 1 or > 12) throw new ArgumentException("Seleccione un mes válido.");
         var periodo = new DateTime(anio, mes, 1);
-        if (periodo > RepositorioFese.Ahora().Date) throw new ArgumentException("No se permite reportar periodos futuros.");
+        if (periodo > PoliticaEntregaFese.Corte(RepositorioFese.Ahora().Date)) throw new ArgumentException("No se permite reportar periodos futuros.");
+        if (!actualizacion) PoliticaEntregaFese.Validar(periodo, false, false, RepositorioFese.Ahora().Date);
         if (archivo.Length <= 0 || archivo.Length > reglas.Value.MaxArchivoBytes) throw new ArgumentException("Archivo vacío o demasiado grande.");
         if (Path.GetExtension(archivo.FileName).ToLowerInvariant() is not (".xlsx" or ".xlsm"))
             throw new ArgumentException("Seleccione un archivo .xlsx o .xlsm. Para .xls, guarde una copia como .xlsx.");
@@ -99,7 +101,7 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, DbFa
             lectura.Advertencias.Add($"La actualización eliminará el centro {centro} del periodo porque no está en el archivo nuevo. Revise las diferencias antes de aceptar.");
         var nombre = Path.GetFileName(archivo.FileName.Replace('\\', '/'));
         if (nombre.Length > 255) throw new ArgumentException("El nombre del archivo es demasiado largo.");
-        var id = await repo.Guardar(entidad, periodo, usuario.IdUsuario, usuario.Usuario, nombre, bytes, lectura);
+        var id = await repo.Guardar(entidad, periodo, usuario.IdUsuario, usuario.Usuario, nombre, bytes, lectura, actualizacion);
         return Ok(new { idCarga = id, advertencias = lectura.Advertencias, filas = lectura.Filas.Count, total = lectura.Filas.Sum(x => x.Total) });
     }
     [HttpGet("cargas")]
@@ -153,6 +155,7 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, DbFa
         var usuario = await acceso.Actual(User, true);
         if (c.Estado == "ACEPTADA") return Ok(new { mensaje = "La entrega ya está aceptada." });
         if (c.Estado != "PENDIENTE") throw new ArgumentException("La carga ya no está pendiente.");
+        PoliticaEntregaFese.Validar(c.Periodo, c.Tipo == "ACTUALIZACION", c.IdCargaBase.HasValue, RepositorioFese.Ahora().Date);
         var acuse = await PrepararAcuse(c, true);
         await repo.Confirmar(id, usuario.IdUsuario, acuse.Pdf, JsonSerializer.Serialize(acuse.Comparativo));
         return Ok(new { mensaje = "Entrega aceptada correctamente." });

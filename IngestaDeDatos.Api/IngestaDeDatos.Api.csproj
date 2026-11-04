@@ -11,6 +11,7 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="logs\" />
+    <EmbeddedResource Include="Fese/Recursos/encabezado.base64" />
   </ItemGroup>
 </Project>
 

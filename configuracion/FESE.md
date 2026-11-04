@@ -24,3 +24,13 @@ Antes de publicar: ejecutar scripts SQL y comprobar en desarrollo el recorrido c
 En Apache, `/fese/api/` debe dirigirse a `http://127.0.0.1:5002/api/`, y `/fese/` al front compilado con `--base-href /fese/`. Agregar el origen HTTPS del sitio a CORS si la configuración productiva lo requiere. No cambiar el proxy DDCP.
 
 No se incluyen credenciales ni se han modificado servicios o bases en esta entrega.
+
+## Corte y actualizaciones
+
+- `GET /api/fese/catalogos` devuelve `corte: { anio, mes }`, calculado con la fecha de Ciudad de México. Corresponde al mes anterior, incluso al cambiar de año.
+- `POST /api/fese/cargas/validar` recibe `actualizacion` como campo del formulario (por defecto `false`). La carga inicial admite únicamente el corte y no puede sustituir una entrega aceptada.
+- Una actualización requiere `actualizacion=true` y una entrega aceptada de esa entidad y periodo. La comprobación se repite dentro de la transacción de guardado; se conserva la sustitución con histórico y la protección contra cargas base desactualizadas.
+- Una carga inicial pendiente de un corte que ya cerró no se puede aceptar fuera de su corte.
+- Los nuevos comprobantes siguen el formato institucional mensual: comparativo por categoría, totales, variaciones de al menos 10% en azul y observaciones. La vista previa se identifica como pendiente y no acredita recepción. Los PDF definitivos ya almacenados conservan su contenido original.
+
+Actualizar API y front juntos. No se requieren scripts SQL nuevos para estos cambios.

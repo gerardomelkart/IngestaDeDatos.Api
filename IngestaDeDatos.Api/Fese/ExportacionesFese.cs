@@ -1,6 +1,5 @@
 using ClosedXML.Excel;
 using System.Globalization;
-using System.Text;
 
 namespace IngestaDeDatos.Api.Fese;
 
@@ -130,79 +129,9 @@ public static class ExportacionesFese
         hoja.RangeUsed()?.SetAutoFilter();
     }
 
-    public static byte[] Acuse(CargaFese carga, List<FilaFese> filas, List<DatoFese> anteriores, List<IncidenteFese> catalogo, bool aceptado)
+    public static byte[] Acuse(CargaFese carga, List<FilaFese> filas, List<DatoFese> anteriores, List<IncidenteFese> catalogo, bool aceptado, DateTimeOffset? fechaEmision = null)
     {
-        var lineas = new List<string>
-        {
-            "CENTRO NACIONAL DE INFORMACIÓN Y DESARROLLO TECNOLÓGICO",
-            "FESE · Servicio de atención de emergencias 9-1-1",
-            aceptado ? "ACUSE DE ENTREGA ACEPTADA" : "VISTA PREVIA · PENDIENTE DE ACEPTACIÓN",
-            $"Entidad: {carga.Entidad}",
-            $"Periodo: {Mes(carga.Periodo.Month)} {carga.Periodo.Year} · {carga.Tipo}",
-            $"Folio: {carga.IdCarga}",
-            $"Archivo: {carga.NombreArchivo}",
-            $"Usuario de carga: {carga.Usuario}",
-            $"Fecha de carga: {carga.FechaCreacion:dd/MM/yyyy HH:mm:ss zzz}",
-            "",
-            "Comparativo de categorías contra el mes anterior",
-            "Categoría                                   Actual       Anterior    Variación %"
-        };
-        var mapa = catalogo.ToDictionary(x => x.Codigo);
-        foreach (var categoria in catalogo.Select(x => x.Categoria).Distinct())
-        {
-            var actual = filas.Where(x => mapa[x.Codigo].Categoria == categoria).Sum(x => x.Total);
-            var datosAnteriores = anteriores.Where(x => x.Categoria == categoria).ToList();
-            var previo = datosAnteriores.Sum(x => x.Total);
-            var variacion = anteriores.Count == 0 || previo == 0 ? "N/D" : ((decimal)(actual - previo) * 100 / previo).ToString("0.00", CultureInfo.InvariantCulture);
-            lineas.Add($"{categoria,-36} {actual,12:N0} {(anteriores.Count == 0 ? "N/D" : previo.ToString("N0")),12} {variacion,12}");
-        }
-        lineas.Add($"TOTAL ACTUAL: {filas.Sum(x => x.Total):N0} llamadas · {filas.Select(x => x.Centro).Distinct().Count()} centros");
-        lineas.Add("Variaciones de al menos 10% en valor absoluto: revisar antes de aceptar.");
-        lineas.Add("Sin entrega anterior o denominador cero: variación no disponible (N/D).");
-        lineas.Add("Revise las advertencias y diferencias en el portal antes de aceptar.");
-        lineas.Add(aceptado ? "Entrega aceptada por el usuario autorizado. Conserve este comprobante." : "Este documento no acredita una entrega aceptada.");
-        // PDF básico sin COM/Office, con fuente estándar WinAnsi y tabla de siete categorías.
-        var contenido = new StringBuilder("0.38 0.07 0.20 rg 44 758 524 3 re f\n");
-        var y = 795;
-        var indice = 0;
-        foreach (var original in lineas)
-        {
-            foreach (var linea in original.Chunk(91).Select(c => new string(c)).DefaultIfEmpty(""))
-            {
-                var seguro = linea.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)").Replace("\r", " ").Replace("\n", " ");
-                var fuente = indice == 0 || indice == 2 || indice == 10 ? "F2" : indice >= 11 && indice < 12 + catalogo.Select(x => x.Categoria).Distinct().Count() ? "F3" : "F1";
-                var tamano = indice == 2 ? 12 : indice >= 11 ? 8 : 9;
-                contenido.Append(indice is 0 or 2 ? "0.38 0.07 0.20 rg\n" : "0.15 0.15 0.15 rg\n");
-                contenido.Append($"BT /{fuente} {tamano} Tf 44 {y} Td ({seguro}) Tj ET\n");
-                y -= indice == 1 || indice == 2 ? 28 : 18;
-            }
-            indice++;
-        }
-        contenido.Append("0.61 0.48 0.29 rg 44 48 524 1 re f\nBT /F1 8 Tf 44 32 Td (FESE 9-1-1 - Comprobante de entrega) Tj ET\n");
-        var encoding = Encoding.Latin1;
-        using var pdf = new MemoryStream();
-        void Escribir(string valor) => pdf.Write(encoding.GetBytes(valor));
-        Escribir("%PDF-1.4\n");
-        var objetos = new[]
-        {
-            "<< /Type /Catalog /Pages 2 0 R >>",
-            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R /F2 6 0 R /F3 7 0 R >> >> /Contents 5 0 R >>",
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-            $"<< /Length {encoding.GetByteCount(contenido.ToString())} >>\nstream\n{contenido}\nendstream",
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>"
-        };
-        var posiciones = new List<long> { 0 };
-        for (var i = 0; i < objetos.Length; i++)
-        {
-            posiciones.Add(pdf.Position);
-            Escribir($"{i + 1} 0 obj\n{objetos[i]}\nendobj\n");
-        }
-        var xref = pdf.Position;
-        Escribir($"xref\n0 {posiciones.Count}\n0000000000 65535 f \n");
-        foreach (var p in posiciones.Skip(1)) Escribir($"{p:0000000000} 00000 n \n");
-        Escribir($"trailer\n<< /Size {posiciones.Count} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
-        return pdf.ToArray();
+        return AcuseFese.Crear(carga, filas, anteriores, catalogo, aceptado,
+            fechaEmision ?? carga.FechaAceptacion ?? RepositorioFese.Ahora());
     }
 }
