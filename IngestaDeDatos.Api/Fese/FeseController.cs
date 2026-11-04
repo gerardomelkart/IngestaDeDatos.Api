@@ -102,7 +102,9 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, DbFa
         var nombre = Path.GetFileName(archivo.FileName.Replace('\\', '/'));
         if (nombre.Length > 255) throw new ArgumentException("El nombre del archivo es demasiado largo.");
         var id = await repo.Guardar(entidad, periodo, usuario.IdUsuario, usuario.Usuario, nombre, bytes, lectura, actualizacion);
-        return Ok(new { idCarga = id, advertencias = lectura.Advertencias, filas = lectura.Filas.Count, total = lectura.Filas.Sum(x => x.Total) });
+        if (!id.HasValue)
+            return Conflict(new { mensaje = "Este periodo ya tiene una entrega aceptada. Utilice Actualizaciones para sustituirla.", codigo = "ENTREGA_YA_ACEPTADA" });
+        return Ok(new { idCarga = id.Value, advertencias = lectura.Advertencias, filas = lectura.Filas.Count, total = lectura.Filas.Sum(x => x.Total) });
     }
     [HttpGet("cargas")]
     public async Task<IActionResult> Cargas(int anio, int? idEntidad)

@@ -79,7 +79,7 @@ public sealed class RepositorioFese(DbFactory factory)
         await tx.CommitAsync();
         return filas;
     }
-    public async Task<Guid> Guardar(int entidad, DateTime periodo, int usuario, string nombreUsuario, string nombreArchivo, byte[] archivo, LecturaFese lectura, bool actualizacion)
+    public async Task<Guid?> Guardar(int entidad, DateTime periodo, int usuario, string nombreUsuario, string nombreArchivo, byte[] archivo, LecturaFese lectura, bool actualizacion)
     {
         await using var db = factory.Modulo("FESE");
         await db.OpenAsync();
@@ -87,6 +87,9 @@ public sealed class RepositorioFese(DbFactory factory)
         if (!await db.ExecuteScalarAsync<bool>("SELECT HABILITADA FROM dbo.FESE_ENTIDAD WHERE ID_ENTIDAD = @entidad", new { entidad }, tx))
             throw new ArgumentException("La entidad está deshabilitada.");
         var cargaBase = await db.QuerySingleOrDefaultAsync<Guid?>("SELECT ID_CARGA FROM dbo.FESE_CARGA WHERE ID_ENTIDAD = @entidad AND PERIODO = @periodo AND ESTADO = 'ACEPTADA'", new { entidad, periodo }, tx);
+        // Es un conflicto de operación esperado. No se crea otra carga inicial.
+        // La comprobación permanece dentro de la transacción para evitar carreras.
+        if (!actualizacion && cargaBase.HasValue) return null;
         PoliticaEntregaFese.Validar(periodo, actualizacion, cargaBase.HasValue, Ahora().Date);
         var anterior = periodo.AddMonths(-1);
         var comparativo = (await db.QueryAsync<DatoFese>("SELECT ID_ENTIDAD IdEntidad, ENTIDAD Entidad, PERIODO Periodo, CENTRO Centro, CODIGO Codigo, INCIDENTE Incidente, CATEGORIA Categoria, PROCEDENTE Procedente, TOTAL Total FROM dbo.FESE_VW_DATOS WHERE ID_ENTIDAD = @entidad AND PERIODO = @anterior", new { entidad, anterior }, tx)).ToList();
