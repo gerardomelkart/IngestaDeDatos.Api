@@ -96,3 +96,21 @@ Los perfiles y las instrucciones de publicación se encuentran en `DDCP.Front/pu
 ## Consulta y exportación 1.0
 
 `GET api/ddcp/datos/excel` admite los parámetros opcionales `filtroAnio`, `filtroMes`, `filtroEntidad`, `filtroDispositivos`, `filtroPersonas`, `orden` y `ascendente`, además del periodo y entidad existentes. La búsqueda es parcial y sin distinguir acentos; el mes usa su nombre del catálogo. El orden admite `anio`, `mes`, `entidad`, `dispositivos` o `personas`. Primero se obtiene la información dentro del alcance autorizado y después se aplican los filtros. Las cantidades y los totales mantienen su precisión. No requiere migración de la base.
+
+## Módulo FESE (primera entrega web)
+
+Se incorpora `/api/fese` conservando las rutas DDCP y la autenticación común. Ver `configuracion/FESE.md` para FESE_DEV/FESE y el script local que reutiliza las credenciales existentes. El frontend y los scripts SQL están en los repositorios privados `FESE.WEB` y `FESE.BD`.
+
+Incluye lectura flexible XLSX/XLSM, cargas pendientes, advertencias, diferencias, revisión del preacuse, confirmación y cancelación; la aceptación usa el comparativo congelado al validar. Actualizaciones sustituyen entidad/mes con histórico transaccional y comprobación de versión base. Los PDF definitivos se almacenan por carga; las lecturas consultan el estado dentro de una transacción para evitar vacíos durante movimientos a histórico.
+
+Los superusuarios nacionales existentes acceden por rol. Los demás usuarios requieren asignación FESE y respetan entidad/alcance y permisos de consulta/carga en todos los endpoints. La administración de cuentas es central; no se duplican passwords ni se asigna DDCP automáticamente al crear usuarios desde FESE.
+
+Pruebas sin conexión SQL:
+
+```powershell
+dotnet run --project .\tests\Fese.Tests\Fese.Tests.csproj
+```
+
+Pruebas SQL y de concurrencia operativa: ejecutar las verificaciones de FESE.BD en FESE_DEV y después probar desde el navegador. No se certifica integración con un servidor SQL hasta realizar ese paso. No se modificaron bases ni servicios en la preparación del paquete.
+
+Se fijó `System.Security.Cryptography.Pkcs` en 9.0.21 para resolver los avisos NuGet detectados al compilar, conservando la línea mayor de la dependencia transitiva.
