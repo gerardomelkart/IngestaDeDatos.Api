@@ -156,10 +156,12 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
     public async Task<IActionResult> Acuse(Guid id)
     {
         var c = await Autorizada(id);
-        if (c.Estado is "ACEPTADA" or "SUSTITUIDA") return File(await repo.Archivo(id, true), "application/pdf", $"Acuse-FESE-{id}.pdf");
+        var entidad = System.Text.RegularExpressions.Regex.Replace(c.Entidad, "[<>:\"/\\\\|?*]", "-").Trim();
+        var nombre = $"Acuse FESE - {ExportacionesFese.Mes(c.Periodo.Month)} {c.Periodo.Year} - {entidad}.pdf";
+        if (c.Estado is "ACEPTADA" or "SUSTITUIDA") return File(await repo.Archivo(id, true), "application/pdf", nombre);
         if (c.Estado != "PENDIENTE") throw new ArgumentException("La carga fue cancelada.");
         var resultado = await PrepararAcuse(c, false);
-        return File(resultado.Pdf, "application/pdf");
+        return File(resultado.Pdf, "application/pdf", nombre);
     }
     [HttpPost("cargas/{id:guid}/aceptar")]
     public async Task<IActionResult> Aceptar(Guid id)
