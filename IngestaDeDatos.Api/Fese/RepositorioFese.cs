@@ -86,6 +86,15 @@ public sealed class RepositorioFese(DbFactory factory)
         await using var tx = await db.BeginTransactionAsync(IsolationLevel.Serializable);
         if (!await db.ExecuteScalarAsync<bool>("SELECT HABILITADA FROM dbo.FESE_ENTIDAD WHERE ID_ENTIDAD = @entidad", new { entidad }, tx))
             throw new ArgumentException("La entidad está deshabilitada.");
+        var operacion = actualizacion ? "ACTUALIZACION" : "CARGA";
+        var abierta = await db.ExecuteScalarAsync<bool>("""
+            SELECT CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.FESE_OPERACION WITH (HOLDLOCK)
+                WHERE CLAVE=@operacion AND HABILITADA=1)
+                AND COALESCE((SELECT CASE WHEN @actualizacion=1 THEN HABILITA_ACTUALIZACION ELSE HABILITA_CARGA END
+                    FROM dbo.FESE_PERMISO_USUARIO WITH (HOLDLOCK) WHERE ID_USUARIO=@usuario),1)=1
+                THEN 1 ELSE 0 END AS bit)
+            """, new { operacion, actualizacion, usuario }, tx);
+        if (!abierta) throw new ArgumentException("La operación se desactivó mientras se validaba. No se guardó una nueva carga.");
         var cargaBase = await db.QuerySingleOrDefaultAsync<Guid?>("SELECT ID_CARGA FROM dbo.FESE_CARGA WHERE ID_ENTIDAD = @entidad AND PERIODO = @periodo AND ESTADO = 'ACEPTADA'", new { entidad, periodo }, tx);
         // Es un conflicto de operación esperado. No se crea otra carga inicial.
         // La comprobación permanece dentro de la transacción para evitar carreras.

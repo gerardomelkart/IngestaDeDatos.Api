@@ -33,4 +33,24 @@ No se incluyen credenciales ni se han modificado servicios o bases en esta entre
 - Una carga inicial pendiente de un corte que ya cerró no se puede aceptar fuera de su corte.
 - Los nuevos comprobantes siguen el formato institucional mensual: comparativo por categoría, totales, variaciones de al menos 10% en azul y observaciones. La vista previa se identifica como pendiente y no acredita recepción. Los PDF definitivos ya almacenados conservan su contenido original.
 
-Actualizar API y front juntos. No se requieren scripts SQL nuevos para estos cambios.
+Actualizar API y front juntos. El ajuste del corte y comprobante no requiere SQL adicional; la gestión de permisos sí requiere la migración indicada abajo.
+
+## Permisos de carga y actualizaciones
+
+Antes de iniciar esta versión, ejecutar en FESE_DEV `FESE.BD/estructura/05_permisos_operacion.sql` y volver a ejecutar `03_confirmacion.sql`. Repetir en FESE cuando se publique.
+
+Gestión de usuarios permite abrir/cerrar ambas operaciones de forma general y editar permisos por cuenta. Se administran solo por superusuarios nacionales, quedan en bitácora FESE y se comprueban al validar y al aceptar. Consultas/descargas/cancelaciones continúan disponibles durante el cierre. Los superusuarios también respetan el cierre operativo y conservan la administración para reabrirlo. El perfil CONSULTA nunca obtiene escritura por activar interruptores.
+
+## Enlaces de desarrollo por entidad
+
+Desde la raíz del repositorio de la API:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\configuracion\crear-enlaces-fese-dev.ps1"
+```
+
+Capturar una contraseña de prueba que cumpla las reglas actuales. Se usa solo para cuentas nuevas. Se crean `fese.enlace.01` a `fese.enlace.32`, con rol ENLACE, alcance estatal y acceso únicamente a FESE. Los nombres y entidades se consultan en las bases, sin usuarios simulados en el front.
+
+El comando se niega a operar fuera de Development, contra autenticación distinta de DDCP_DEV, si faltan entidades o si hay cuentas con el mismo nombre y otra configuración. Es transaccional y repetible: no sobrescribe cuentas ni contraseñas existentes. No crea cuentas en producción. La sesión actual no tiene acceso al SQL del usuario: la creación efectiva se realiza al ejecutar el comando local.
+
+Con el superusuario se ven las 32 entidades y Gestión de usuarios. Con `fese.enlace.03`, por ejemplo, se entra únicamente a la entidad 03 del catálogo; no se muestra administración ni descarga CNIEDT nacional. Para otra entidad, usar su número oficial de dos dígitos.

@@ -106,6 +106,30 @@ using (var dev = new DbFactory(config, new EntornoPrueba("Development")).Modulo(
     Assert(dev.Database == "FESE_DEV", "Desarrollo selecciona FESE_DEV");
 try { using var incorrecta = new DbFactory(config, new EntornoPrueba("Production")).Modulo("FESE"); throw new Exception("Producción aceptó base DEV"); }
 catch (InvalidOperationException) { Console.WriteLine("OK: Producción rechaza una conexión a FESE_DEV"); }
+var operacionAbierta = new PermisoFese(true, true);
+var operacionCerrada = new PermisoFese(false, false);
+Assert(PermisosFese.Combinar(true, operacionAbierta, new(false, true)) == new PermisoFese(false, true), "Carga y actualización se autorizan por separado");
+Assert(PermisosFese.Combinar(true, operacionCerrada, operacionAbierta) == operacionCerrada, "El cierre general prevalece sobre el permiso individual");
+Assert(PermisosFese.Combinar(false, operacionAbierta, operacionAbierta) == operacionCerrada, "Consulta no obtiene permisos de carga aunque estén activados");
+Assert(PermisosFese.Combinar(true, operacionAbierta, null) == operacionAbierta, "Las cuentas existentes conservan permisos hasta su configuración");
+try
+{
+    await EnlacesDesarrolloFese.Crear(new DbFactory(config, new EntornoPrueba("Production")), new EntornoPrueba("Production"), new IngestaDeDatos.Api.Configuration.ReglasDdcpOptions());
+    throw new Exception("Se permitió crear cuentas de prueba en producción");
+}
+catch (InvalidOperationException ex) when (ex.Message.Contains("Development")) { Console.WriteLine("OK: Las cuentas de prueba rechazan producción antes de conectar"); }
+var authProductiva = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+{
+    ["Modulos:FESE:Conexion"] = "FESE",
+    ["ConnectionStrings:FESE"] = "Server=localhost;Database=FESE_DEV;Integrated Security=true",
+    ["ConnectionStrings:Autenticacion"] = "Server=localhost;Database=DDCP;Integrated Security=true"
+}).Build();
+try
+{
+    await EnlacesDesarrolloFese.Crear(new DbFactory(authProductiva, new EntornoPrueba("Development")), new EntornoPrueba("Development"), new IngestaDeDatos.Api.Configuration.ReglasDdcpOptions());
+    throw new Exception("Se permitió crear cuentas en DDCP productivo");
+}
+catch (InvalidOperationException ex) when (ex.Message.Contains("DDCP_DEV")) { Console.WriteLine("OK: Las cuentas de prueba requieren DDCP_DEV antes de conectar"); }
 Console.WriteLine("Pruebas correctas");
 
 static void Rechaza(Action accion, string mensaje)

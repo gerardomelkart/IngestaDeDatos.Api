@@ -30,7 +30,7 @@ public sealed class ErrorFeseAttribute : ExceptionFilterAttribute
 }
 
 [ApiController, Authorize, Route("api/fese"), ErrorFese]
-public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, DbFactory factory, LectorFese lector, UsuariosService usuarios, IOptions<ReglasDdcpOptions> reglas) : ControllerBase
+public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, PermisosFese permisos, DbFactory factory, LectorFese lector, UsuariosService usuarios, IOptions<ReglasDdcpOptions> reglas) : ControllerBase
 {
     private const string MimeExcel = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     private static void Anio(int anio)
@@ -49,15 +49,18 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, DbFa
     {
         var usuario = await acceso.Actual(User);
         await using var db = factory.Auth();
-        var roles = await db.QueryAsync("SELECT CLAVE clave, NOMBRE nombre, NACIONAL_OBLIGATORIO nacionalObligatorio FROM dbo.CAT_ROL WHERE HABILITADO = 1 ORDER BY ORDEN");
+        var roles = await db.QueryAsync("SELECT CLAVE clave, NOMBRE nombre, NACIONAL_OBLIGATORIO nacionalObligatorio, PUEDE_CARGAR puedeCargar FROM dbo.CAT_ROL WHERE HABILITADO = 1 ORDER BY ORDEN");
         var meses = await db.QueryAsync("SELECT ID_MES id, NOMBRE nombre FROM dbo.CAT_MES ORDER BY ID_MES");
         var corte = PoliticaEntregaFese.Corte(RepositorioFese.Ahora().Date);
-        return Ok(new { corte = new { anio = corte.Year, mes = corte.Month }, usuario, entidades = (await repo.Entidades()).Where(e => usuario.EsNacional || e.IdEntidad == usuario.IdEntidad), incidentes = await repo.Catalogo(), roles, meses });
+        return Ok(new { permisos = await permisos.Efectivos(usuario), corte = new { anio = corte.Year, mes = corte.Month }, usuario, entidades = (await repo.Entidades()).Where(e => usuario.EsNacional || e.IdEntidad == usuario.IdEntidad), incidentes = await repo.Catalogo(), roles, meses });
     }
     [HttpPost("cargas/validar")]
     public async Task<IActionResult> Validar([FromForm] IFormFile archivo, [FromForm] int idEntidad, [FromForm] int anio, [FromForm] int mes, [FromForm] bool actualizacion = false)
     {
         var usuario = await acceso.Actual(User, true);
+        var permiso = await permisos.Efectivos(usuario);
+        if (!(actualizacion ? permiso.HabilitaActualizacion : permiso.HabilitaCarga))
+            return StatusCode(403, new { mensaje = actualizacion ? "Las actualizaciones están desactivadas para su cuenta." : "La carga inicial está desactivada para su cuenta." });
         var entidad = AccesoFese.Entidad(usuario, idEntidad);
         Anio(anio);
         if (mes is < 1 or > 12) throw new ArgumentException("Seleccione un mes válido.");
@@ -158,6 +161,9 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, DbFa
         if (c.Estado == "ACEPTADA") return Ok(new { mensaje = "La entrega ya está aceptada." });
         if (c.Estado != "PENDIENTE") throw new ArgumentException("La carga ya no está pendiente.");
         PoliticaEntregaFese.Validar(c.Periodo, c.Tipo == "ACTUALIZACION", c.IdCargaBase.HasValue, RepositorioFese.Ahora().Date);
+        var permiso = await permisos.Efectivos(usuario);
+        if (!(c.Tipo == "ACTUALIZACION" ? permiso.HabilitaActualizacion : permiso.HabilitaCarga))
+            return StatusCode(403, new { mensaje = "La operación está desactivada. Su carga permanece pendiente; podrá aceptarla al habilitarla nuevamente." });
         var acuse = await PrepararAcuse(c, true);
         await repo.Confirmar(id, usuario.IdUsuario, acuse.Pdf, JsonSerializer.Serialize(acuse.Comparativo));
         return Ok(new { mensaje = "Entrega aceptada correctamente." });
@@ -200,13 +206,60 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, DbFa
     {
         await acceso.Actual(User, administra: true);
         await using var db = factory.Auth();
-        return Ok(await db.QueryAsync("""
+        var cuentas = (await db.QueryAsync<CuentaFese>("""
             SELECT u.ID_USUARIO idUsuario, u.USUARIO usuario, u.NOMBRE nombre, u.ROL rol,
                 u.ES_NACIONAL esNacional, u.ID_ENTIDAD idEntidad, u.HABILITADO habilitado,
                 CAST(CASE WHEN EXISTS(SELECT 1 FROM dbo.ING_USUARIO_MODULO m WHERE m.ID_USUARIO=u.ID_USUARIO AND m.CLAVE='FESE')
                     OR (r.PUEDE_ADMINISTRAR_USUARIOS=1 AND u.ES_NACIONAL=1) THEN 1 ELSE 0 END AS bit) accesoFese
             FROM dbo.ING_USUARIO u JOIN dbo.CAT_ROL r ON r.CLAVE=u.ROL ORDER BY u.USUARIO
-            """));
+            """)).ToList();
+        var individuales = (await permisos.Cuentas()).ToDictionary(p => p.IdUsuario);
+        foreach (var c in cuentas)
+        {
+            var p = individuales.GetValueOrDefault(c.IdUsuario);
+            c.HabilitaCarga = p?.HabilitaCarga ?? true;
+            c.HabilitaActualizacion = p?.HabilitaActualizacion ?? true;
+            c.VersionPermisos = p?.Version ?? 0;
+        }
+        return Ok(cuentas);
+    }
+    public sealed record CambioOperacion(string Clave, bool? Habilitada, long Version);
+    public sealed record CambioPermiso(bool? HabilitaCarga, bool? HabilitaActualizacion, long Version);
+    [HttpGet("operaciones")]
+    public async Task<IActionResult> Operaciones()
+    {
+        await acceso.Actual(User, administra: true);
+        return Ok(await permisos.Generales());
+    }
+    [HttpPut("operaciones")]
+    public async Task<IActionResult> CambiarOperacion(CambioOperacion request)
+    {
+        var actor = await acceso.Actual(User, administra: true);
+        if (request.Clave is not ("CARGA" or "ACTUALIZACION") || request.Habilitada is null || request.Version < 1)
+            return BadRequest(new { mensaje = "Seleccione una operación y su estado vigente." });
+        if (!await permisos.CambiarGeneral(request.Clave, request.Habilitada.Value, request.Version, actor.IdUsuario))
+            return Conflict(new { mensaje = "La configuración cambió. Actualice la vista e intente nuevamente." });
+        return Ok(await permisos.Generales());
+    }
+    [HttpPut("usuarios/{id:int}/permisos")]
+    public async Task<IActionResult> CambiarPermisos(int id, CambioPermiso request)
+    {
+        var actor = await acceso.Actual(User, administra: true);
+        if (request.HabilitaCarga is null || request.HabilitaActualizacion is null || request.Version < 0)
+            return BadRequest(new { mensaje = "Indique ambos permisos y su versión vigente." });
+        await using var db = factory.Auth();
+        var existe = await db.ExecuteScalarAsync<bool>("""
+            SELECT CAST(CASE WHEN EXISTS (
+                SELECT 1 FROM dbo.ING_USUARIO u JOIN dbo.CAT_ROL r ON r.CLAVE=u.ROL
+                WHERE u.ID_USUARIO=@id AND u.HABILITADO=1 AND r.HABILITADO=1
+                  AND ((r.PUEDE_ADMINISTRAR_USUARIOS=1 AND u.ES_NACIONAL=1)
+                    OR EXISTS (SELECT 1 FROM dbo.ING_USUARIO_MODULO m WHERE m.ID_USUARIO=u.ID_USUARIO AND m.CLAVE='FESE'))
+            ) THEN 1 ELSE 0 END AS bit)
+            """, new { id });
+        if (!existe) return BadRequest(new { mensaje = "La cuenta debe estar activa y tener acceso a FESE." });
+        if (!await permisos.CambiarCuenta(id, new(request.HabilitaCarga.Value, request.HabilitaActualizacion.Value), request.Version, actor.IdUsuario))
+            return Conflict(new { mensaje = "Los permisos cambiaron. Actualice el listado antes de editar." });
+        return Ok(new { mensaje = "Permisos FESE actualizados." });
     }
     public sealed record Asignacion(bool Habilitado);
     [HttpPut("usuarios/{id:int}/acceso")]

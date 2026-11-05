@@ -41,3 +41,18 @@ public sealed class DatoFese
     public long Total { get; set; }
 }
 public sealed record DiferenciaFese(string Centro, int Codigo, long? Anterior, long? Nuevo);
+
+public sealed class CuentaFese
+{
+    public int IdUsuario { get; set; }
+    public string Usuario { get; set; } = "";
+    public string Nombre { get; set; } = "";
+    public string Rol { get; set; } = "";
+    public bool EsNacional { get; set; }
+    public int? IdEntidad { get; set; }
+    public bool Habilitado { get; set; }
+    public bool AccesoFese { get; set; }
+    public bool HabilitaCarga { get; set; }
+    public bool HabilitaActualizacion { get; set; }
+    public long VersionPermisos { get; set; }
+}
