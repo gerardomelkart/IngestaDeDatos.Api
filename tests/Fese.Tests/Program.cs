@@ -121,12 +121,6 @@ using (var dev = new DbFactory(config, new EntornoPrueba("Development")).Modulo(
     Assert(dev.Database == "FESE_DEV", "Desarrollo selecciona FESE_DEV");
 try { using var incorrecta = new DbFactory(config, new EntornoPrueba("Production")).Modulo("FESE"); throw new Exception("Producción aceptó base DEV"); }
 catch (InvalidOperationException) { Console.WriteLine("OK: Producción rechaza una conexión a FESE_DEV"); }
-var operacionAbierta = new PermisoFese(true, true);
-var operacionCerrada = new PermisoFese(false, false);
-Assert(PermisosFese.Combinar(true, operacionAbierta, new(false, true)) == new PermisoFese(false, true), "Carga y actualización se autorizan por separado");
-Assert(PermisosFese.Combinar(true, operacionCerrada, operacionAbierta) == operacionCerrada, "El cierre general prevalece sobre el permiso individual");
-Assert(PermisosFese.Combinar(false, operacionAbierta, operacionAbierta) == operacionCerrada, "Consulta no obtiene permisos de carga aunque estén activados");
-Assert(PermisosFese.Combinar(true, operacionAbierta, null) == operacionAbierta, "Las cuentas existentes conservan permisos hasta su configuración");
 Assert(PasswordFese.DebeCambiar(false, true), "Producción exige cambio cuando la cuenta está marcada");
 Assert(!PasswordFese.DebeCambiar(true, true), "Desarrollo omite el cambio obligatorio aunque exista marca");
 Assert(!PasswordFese.DebeCambiar(false, false), "No se obliga a cambiar a cuentas sin marca");

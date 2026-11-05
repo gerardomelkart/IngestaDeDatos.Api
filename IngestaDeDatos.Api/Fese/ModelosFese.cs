@@ -55,4 +55,6 @@ public sealed class CuentaFese
     public bool HabilitaCarga { get; set; }
     public bool HabilitaActualizacion { get; set; }
     public long VersionPermisos { get; set; }
+    public bool ExcepcionCarga { get; set; }
+    public bool ExcepcionActualizacion { get; set; }
 }

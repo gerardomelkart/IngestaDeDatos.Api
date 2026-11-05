@@ -226,17 +226,20 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
             FROM dbo.ING_USUARIO u JOIN dbo.CAT_ROL r ON r.CLAVE=u.ROL ORDER BY u.USUARIO
             """)).ToList();
         var individuales = (await permisos.Cuentas()).ToDictionary(p => p.IdUsuario);
+        var excepciones = (await permisos.Excepciones()).ToHashSet();
         foreach (var c in cuentas)
         {
             var p = individuales.GetValueOrDefault(c.IdUsuario);
             c.HabilitaCarga = p?.HabilitaCarga ?? true;
             c.HabilitaActualizacion = p?.HabilitaActualizacion ?? true;
             c.VersionPermisos = p?.Version ?? 0;
+            c.ExcepcionCarga = excepciones.Contains(new(c.IdUsuario, "CARGA"));
+            c.ExcepcionActualizacion = excepciones.Contains(new(c.IdUsuario, "ACTUALIZACION"));
         }
         return Ok(cuentas);
     }
     public sealed record CambioOperacion(string Clave, bool? Habilitada, long Version);
-    public sealed record CambioPermiso(bool? HabilitaCarga, bool? HabilitaActualizacion, long Version);
+    public sealed record CambioPermiso(bool? HabilitaCarga, bool? HabilitaActualizacion, long Version, CambioOperacion? Excepcion = null);
     [HttpGet("operaciones")]
     public async Task<IActionResult> Operaciones()
     {
@@ -257,19 +260,29 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
     public async Task<IActionResult> CambiarPermisos(int id, CambioPermiso request)
     {
         var actor = await acceso.Actual(User, administra: true);
-        if (request.HabilitaCarga is null || request.HabilitaActualizacion is null || request.Version < 0)
+        var excepcion = request.Excepcion;
+        if (excepcion is not null && (excepcion.Clave is not ("CARGA" or "ACTUALIZACION") || excepcion.Habilitada is null || excepcion.Version < 1))
+            return BadRequest(new { mensaje = "Indique la operación cerrada y su versión." });
+        if (excepcion is null && (request.HabilitaCarga is null || request.HabilitaActualizacion is null || request.Version < 0))
             return BadRequest(new { mensaje = "Indique ambos permisos y su versión vigente." });
         await using var db = factory.Auth();
         var existe = await db.ExecuteScalarAsync<bool>("""
             SELECT CAST(CASE WHEN EXISTS (
                 SELECT 1 FROM dbo.ING_USUARIO u JOIN dbo.CAT_ROL r ON r.CLAVE=u.ROL
                 WHERE u.ID_USUARIO=@id AND u.HABILITADO=1 AND r.HABILITADO=1
+                  AND (@esExcepcion=0 OR r.PUEDE_CARGAR=1)
                   AND ((r.PUEDE_ADMINISTRAR_USUARIOS=1 AND u.ES_NACIONAL=1)
                     OR EXISTS (SELECT 1 FROM dbo.ING_USUARIO_MODULO m WHERE m.ID_USUARIO=u.ID_USUARIO AND m.CLAVE='FESE'))
             ) THEN 1 ELSE 0 END AS bit)
-            """, new { id });
-        if (!existe) return BadRequest(new { mensaje = "La cuenta debe estar activa y tener acceso a FESE." });
-        if (!await permisos.CambiarCuenta(id, new(request.HabilitaCarga.Value, request.HabilitaActualizacion.Value), request.Version, actor.IdUsuario))
+            """, new { id, esExcepcion = excepcion is not null });
+        if (!existe) return BadRequest(new { mensaje = "La cuenta debe estar activa, tener acceso a FESE y contar con un rol que permita cargar para recibir una excepción." });
+        if (excepcion is not null)
+        {
+            if (!await permisos.CambiarExcepcion(id, excepcion.Clave, excepcion.Habilitada!.Value, excepcion.Version, actor.IdUsuario))
+                return Conflict(new { mensaje = "El cierre general cambió. Actualice la vista e intente nuevamente." });
+            return Ok(new { mensaje = "Excepción individual actualizada." });
+        }
+        if (!await permisos.CambiarCuenta(id, new(request.HabilitaCarga!.Value, request.HabilitaActualizacion!.Value), request.Version, actor.IdUsuario))
             return Conflict(new { mensaje = "Los permisos cambiaron. Actualice el listado antes de editar." });
         return Ok(new { mensaje = "Permisos FESE actualizados." });
     }
