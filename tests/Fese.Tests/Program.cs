@@ -112,24 +112,15 @@ Assert(PermisosFese.Combinar(true, operacionAbierta, new(false, true)) == new Pe
 Assert(PermisosFese.Combinar(true, operacionCerrada, operacionAbierta) == operacionCerrada, "El cierre general prevalece sobre el permiso individual");
 Assert(PermisosFese.Combinar(false, operacionAbierta, operacionAbierta) == operacionCerrada, "Consulta no obtiene permisos de carga aunque estén activados");
 Assert(PermisosFese.Combinar(true, operacionAbierta, null) == operacionAbierta, "Las cuentas existentes conservan permisos hasta su configuración");
-try
-{
-    await EnlacesDesarrolloFese.Crear(new DbFactory(config, new EntornoPrueba("Production")), new EntornoPrueba("Production"), new IngestaDeDatos.Api.Configuration.ReglasDdcpOptions());
-    throw new Exception("Se permitió crear cuentas de prueba en producción");
-}
-catch (InvalidOperationException ex) when (ex.Message.Contains("Development")) { Console.WriteLine("OK: Las cuentas de prueba rechazan producción antes de conectar"); }
-var authProductiva = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-{
-    ["Modulos:FESE:Conexion"] = "FESE",
-    ["ConnectionStrings:FESE"] = "Server=localhost;Database=FESE_DEV;Integrated Security=true",
-    ["ConnectionStrings:Autenticacion"] = "Server=localhost;Database=DDCP;Integrated Security=true"
-}).Build();
-try
-{
-    await EnlacesDesarrolloFese.Crear(new DbFactory(authProductiva, new EntornoPrueba("Development")), new EntornoPrueba("Development"), new IngestaDeDatos.Api.Configuration.ReglasDdcpOptions());
-    throw new Exception("Se permitió crear cuentas en DDCP productivo");
-}
-catch (InvalidOperationException ex) when (ex.Message.Contains("DDCP_DEV")) { Console.WriteLine("OK: Las cuentas de prueba requieren DDCP_DEV antes de conectar"); }
+Assert(PasswordFese.DebeCambiar(false, true), "Producción exige cambio cuando la cuenta está marcada");
+Assert(!PasswordFese.DebeCambiar(true, true), "Desarrollo omite el cambio obligatorio aunque exista marca");
+Assert(!PasswordFese.DebeCambiar(false, false), "No se obliga a cambiar a cuentas sin marca");
+var hashInicialFese = "$2a$12$Mi2bNvZuKFkh/J8.GbmsP.THgHfMgAdXIujZiQ7rJJkBVy5lfAdk.";
+Assert(BCrypt.Net.BCrypt.Verify("password01", hashInicialFese), "El hash del query autentica con password01");
+var reglasPassword = new IngestaDeDatos.Api.Configuration.ReglasDdcpOptions { PasswordMinimo = 10, PasswordMaximoBytes = 72 };
+Assert(PasswordFese.ValidarNueva("password01", hashInicialFese, reglasPassword) is not null, "No permite conservar la contrasena inicial al cambiarla");
+Assert(PasswordFese.ValidarNueva("NuevaClave2026!", hashInicialFese, reglasPassword) is null, "Acepta una nueva contrasena distinta que cumple las reglas");
+Assert(PasswordFese.ValidarNueva("corta", hashInicialFese, reglasPassword) is not null, "El cambio respeta las reglas de longitud");
 Console.WriteLine("Pruebas correctas");
 
 static void Rechaza(Action accion, string mensaje)

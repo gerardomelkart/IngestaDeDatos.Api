@@ -41,16 +41,16 @@ Antes de iniciar esta versión, ejecutar en FESE_DEV `FESE.BD/estructura/05_perm
 
 Gestión de usuarios permite abrir/cerrar ambas operaciones de forma general y editar permisos por cuenta. Se administran solo por superusuarios nacionales, quedan en bitácora FESE y se comprueban al validar y al aceptar. Consultas/descargas/cancelaciones continúan disponibles durante el cierre. Los superusuarios también respetan el cierre operativo y conservan la administración para reabrirlo. El perfil CONSULTA nunca obtiene escritura por activar interruptores.
 
-## Enlaces de desarrollo por entidad
+## Enlaces por entidad mediante queries
 
-Desde la raíz del repositorio de la API:
+Los queries listos están en FESE.BD:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\configuracion\crear-enlaces-fese-dev.ps1"
-```
+- En DDCP_DEV, ejecutar `estructura/06_enlaces_desarrollo.sql`. Cada usuario lleva literalmente el nombre de su entidad del catálogo central; su contraseña es `password01`. Repetir el query restablece esa contraseña y reactiva los enlaces de desarrollo correspondientes. Las cuentas anteriores `fese.enlace.XX` se desactivan únicamente si eran enlaces estatales con acceso exclusivo a FESE. No se borran entregas ni usuarios.
+- Ejecutar `estructura/07_cambio_password.sql` en FESE_DEV y FESE. Crea la marca de cambio obligatorio, sin modificar estados existentes.
+- En producción, después de la migración en FESE, ejecutar `estructura/08_enlaces_produccion.sql` en DDCP. Las cuentas nuevas reciben la contraseña inicial `password01` y quedan obligadas a cambiarla. Las cuentas existentes y sus contraseñas no se restablecen.
 
-Capturar una contraseña de prueba que cumpla las reglas actuales. Se usa solo para cuentas nuevas. Se crean `fese.enlace.01` a `fese.enlace.32`, con rol ENLACE, alcance estatal y acceso únicamente a FESE. Los nombres y entidades se consultan en las bases, sin usuarios simulados en el front.
+En Development no se pide cambio obligatorio, aunque una cuenta tenga la marca. En producción, una cuenta marcada únicamente puede obtener los catálogos necesarios para acceder al formulario y cambiar su contraseña. La API bloquea los demás endpoints FESE hasta completar el cambio. El formulario comprueba la contraseña actual y exige una nueva distinta que cumpla las reglas vigentes.
 
-El comando se niega a operar fuera de Development, contra autenticación distinta de DDCP_DEV, si faltan entidades o si hay cuentas con el mismo nombre y otra configuración. Es transaccional y repetible: no sobrescribe cuentas ni contraseñas existentes. No crea cuentas en producción. La sesión actual no tiene acceso al SQL del usuario: la creación efectiva se realiza al ejecutar el comando local.
+La contraseña se actualiza en la autenticación central y se libera la marca FESE dentro de una sola transacción entre las bases del mismo servidor. No se guardan contraseñas de usuario en el front ni en la tabla de marcas. Un cambio central también aplica a otros sistemas a los que esa cuenta ya tenga acceso.
 
-Con el superusuario se ven las 32 entidades y Gestión de usuarios. Con `fese.enlace.03`, por ejemplo, se entra únicamente a la entidad 03 del catálogo; no se muestra administración ni descarga CNIEDT nacional. Para otra entidad, usar su número oficial de dos dígitos.
+El comando anterior `--crear-enlaces-fese-dev` y su script PowerShell se retiraron. No se han ejecutado estos queries en las bases del usuario desde esta sesión.

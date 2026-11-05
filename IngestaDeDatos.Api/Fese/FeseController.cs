@@ -29,8 +29,8 @@ public sealed class ErrorFeseAttribute : ExceptionFilterAttribute
     }
 }
 
-[ApiController, Authorize, Route("api/fese"), ErrorFese]
-public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, PermisosFese permisos, DbFactory factory, LectorFese lector, UsuariosService usuarios, IOptions<ReglasDdcpOptions> reglas) : ControllerBase
+[ApiController, Authorize, Route("api/fese"), ErrorFese, ServiceFilter(typeof(PasswordFeseFilter))]
+public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, PermisosFese permisos, PasswordFese password, DbFactory factory, LectorFese lector, UsuariosService usuarios, IOptions<ReglasDdcpOptions> reglas) : ControllerBase
 {
     private const string MimeExcel = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     private static void Anio(int anio)
@@ -52,7 +52,15 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
         var roles = await db.QueryAsync("SELECT CLAVE clave, NOMBRE nombre, NACIONAL_OBLIGATORIO nacionalObligatorio, PUEDE_CARGAR puedeCargar FROM dbo.CAT_ROL WHERE HABILITADO = 1 ORDER BY ORDEN");
         var meses = await db.QueryAsync("SELECT ID_MES id, NOMBRE nombre FROM dbo.CAT_MES ORDER BY ID_MES");
         var corte = PoliticaEntregaFese.Corte(RepositorioFese.Ahora().Date);
-        return Ok(new { permisos = await permisos.Efectivos(usuario), corte = new { anio = corte.Year, mes = corte.Month }, usuario, entidades = (await repo.Entidades()).Where(e => usuario.EsNacional || e.IdEntidad == usuario.IdEntidad), incidentes = await repo.Catalogo(), roles, meses });
+        return Ok(new { requiereCambioPassword = await password.Requiere(usuario.IdUsuario), passwordMinimo = reglas.Value.PasswordMinimo, permisos = await permisos.Efectivos(usuario), corte = new { anio = corte.Year, mes = corte.Month }, usuario, entidades = (await repo.Entidades()).Where(e => usuario.EsNacional || e.IdEntidad == usuario.IdEntidad), incidentes = await repo.Catalogo(), roles, meses });
+    }
+    public sealed record CambioPassword(string? Actual, string? Nueva);
+    [HttpPost("password")]
+    public async Task<IActionResult> CambiarPassword(CambioPassword request)
+    {
+        var usuario = await acceso.Actual(User);
+        var error = await password.Cambiar(usuario.IdUsuario, request.Actual ?? "", request.Nueva ?? "");
+        return error is null ? Ok(new { mensaje = "Contraseña actualizada correctamente." }) : BadRequest(new { mensaje = error });
     }
     [HttpPost("cargas/validar")]
     public async Task<IActionResult> Validar([FromForm] IFormFile archivo, [FromForm] int idEntidad, [FromForm] int anio, [FromForm] int mes, [FromForm] bool actualizacion = false)

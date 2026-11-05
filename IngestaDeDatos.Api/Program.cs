@@ -25,6 +25,8 @@ try
     builder.Services.AddSingleton<DbFactory>();
     builder.Services.AddScoped<IngestaDeDatos.Api.Fese.AccesoFese>();
     builder.Services.AddScoped<IngestaDeDatos.Api.Fese.PermisosFese>();
+    builder.Services.AddScoped<IngestaDeDatos.Api.Fese.PasswordFese>();
+    builder.Services.AddScoped<IngestaDeDatos.Api.Fese.PasswordFeseFilter>();
     builder.Services.AddScoped<IngestaDeDatos.Api.Fese.RepositorioFese>();
     builder.Services.AddSingleton<IngestaDeDatos.Api.Fese.LectorFese>();
     builder.Services.AddScoped<ICatalogosRepository, CatalogosRepository>();
@@ -34,15 +36,6 @@ try
     builder.Services.AddScoped<DdcpService>();
     builder.Services.AddControllers();
     builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? []).AllowAnyHeader().AllowAnyMethod()));
-
-    if (args.Contains("--crear-enlaces-fese-dev"))
-    {
-        await using var bootstrap = builder.Build();
-        using var scope = bootstrap.Services.CreateScope();
-        await IngestaDeDatos.Api.Fese.EnlacesDesarrolloFese.Crear(
-            scope.ServiceProvider.GetRequiredService<DbFactory>(), builder.Environment, reglas);
-        return;
-    }
 
     if (args.Contains("--crear-superusuario"))
     {
