@@ -55,8 +55,7 @@ internal sealed class AcuseFese
         doc.Linea(doc.y + 10);
         doc.y -= 17;
         doc.Parrafo("Nota metodológica: Las variaciones porcentuales iguales o superiores al 10% en valor absoluto se resaltan en color azul para facilitar la identificación de los cambios más significativos respecto del mes anterior.", 8, 11);
-        if (anteriores.Count == 0 || anteriores.Sum(d => d.Total) == 0)
-            doc.Parrafo("N/D: no se cuenta con una entrega del mes anterior o el denominador es cero. No representa una variación de cero.", 8, 11);
+        doc.Parrafo("N/D en azul: comparativo no disponible por falta de entrega anterior o denominador cero.", 8, 11);
         doc.y -= 22;
         var advertencias = JsonSerializer.Deserialize<List<string>>(carga.Advertencias) ?? [];
         doc.Parrafo("Observaciones: " + (advertencias.Count == 0 ? "Sin observaciones." : string.Join(" ", advertencias)), 10, 14);
@@ -68,10 +67,10 @@ internal sealed class AcuseFese
         if (sombrear) contenido.Append(FormattableString.Invariant($"0.94 0.94 0.94 rg 54 {y - 5} 504 18 re f\n"));
         Texto(nombre, Izquierda + 5, y, 10, negrita: total);
         Texto(actual.ToString("N0", Cultura), 397, y, 10, true, total);
-        Texto(hayAnterior ? previo.ToString("N0", Cultura) : "N/D", 474, y, 10, true, total);
+        Texto(hayAnterior ? previo.ToString("N0", Cultura) : "N/D", 474, y, 10, true, total, hayAnterior ? "0 0 0" : Azul);
         decimal? variacion = hayAnterior && previo != 0 ? ((decimal)actual - previo) * 100 / previo : null;
         Texto(variacion?.ToString("0.00", Cultura) ?? "N/D", Derecha - 5, y, 10, true, total,
-            variacion.HasValue && Math.Abs(variacion.Value) >= 10 ? Azul : "0 0 0");
+            !variacion.HasValue || Math.Abs(variacion.Value) >= 10 ? Azul : "0 0 0");
         y -= 18;
     }
 
