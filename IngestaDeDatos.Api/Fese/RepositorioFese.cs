@@ -1,6 +1,7 @@
 using Dapper;
 using IngestaDeDatos.Api.Data;
 using System.Data;
+using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
@@ -69,15 +70,31 @@ public sealed class RepositorioFese(DbFactory factory)
         await db.OpenAsync();
         await using var tx = await db.BeginTransactionAsync(IsolationLevel.Serializable);
         var estado = await db.QuerySingleAsync<string>("SELECT ESTADO FROM dbo.FESE_CARGA WITH (HOLDLOCK) WHERE ID_CARGA=@id", new { id = carga.IdCarga }, tx);
+        var filas = await LeerFilas(db, tx, carga.IdCarga, estado);
+        await tx.CommitAsync();
+        return filas;
+    }
+    public async Task<(CargaFese Carga, List<FilaFese> Filas)> DatosAcuse(Guid id)
+    {
+        await using var db = factory.Modulo("FESE");
+        await db.OpenAsync();
+        await using var tx = await db.BeginTransactionAsync(IsolationLevel.Serializable);
+        var carga = await db.QuerySingleOrDefaultAsync<CargaFese>(
+            $"SELECT {ColumnasCarga} {DesdeCarga} WHERE c.ID_CARGA = @id", new { id }, tx)
+            ?? throw new ArgumentException("Carga inexistente.");
+        var filas = await LeerFilas(db, tx, id, carga.Estado);
+        await tx.CommitAsync();
+        return (carga, filas);
+    }
+    private static async Task<List<FilaFese>> LeerFilas(SqlConnection db, DbTransaction tx, Guid id, string estado)
+    {
         var sql = estado switch
         {
             "PENDIENTE" => "SELECT CENTRO Centro, CODIGO Codigo, TOTAL Total FROM dbo.FESE_TEMPORAL WHERE ID_CARGA = @id",
             "ACEPTADA" => "SELECT CENTRO Centro, CODIGO Codigo, TOTAL Total FROM dbo.FESE_DATO WHERE ID_CARGA = @id",
             _ => "SELECT CENTRO Centro, CODIGO Codigo, TOTAL Total FROM dbo.FESE_HISTORICO WHERE ID_CARGA = @id"
         };
-        var filas = (await db.QueryAsync<FilaFese>(sql, new { id = carga.IdCarga }, tx)).ToList();
-        await tx.CommitAsync();
-        return filas;
+        return (await db.QueryAsync<FilaFese>(sql, new { id }, tx)).ToList();
     }
     public async Task<Guid?> Guardar(int entidad, DateTime periodo, int usuario, string nombreUsuario, string nombreArchivo, byte[] archivo, LecturaFese lectura, bool actualizacion)
     {
@@ -138,20 +155,20 @@ public sealed class RepositorioFese(DbFactory factory)
         await tx.CommitAsync();
         return id;
     }
-    public async Task Confirmar(Guid id, int usuario, byte[] pdf, string comparativo)
+    public async Task Confirmar(Guid id, int usuario)
     {
         await using var db = factory.Modulo("FESE");
-        await db.ExecuteAsync("dbo.FESE_ACEPTAR", new { IdCarga = id, IdUsuario = usuario, AcusePdf = pdf, ComparativoJson = comparativo }, commandType: CommandType.StoredProcedure, commandTimeout: 180);
+        await db.ExecuteAsync("dbo.FESE_ACEPTAR", new { IdCarga = id, IdUsuario = usuario }, commandType: CommandType.StoredProcedure, commandTimeout: 180);
     }
     public async Task Cancelar(Guid id, int usuario)
     {
         await using var db = factory.Modulo("FESE");
         await db.ExecuteAsync("dbo.FESE_CANCELAR", new { IdCarga = id, IdUsuario = usuario }, commandType: CommandType.StoredProcedure);
     }
-    public async Task<byte[]> Archivo(Guid id, bool acuse)
+    public async Task<byte[]> Archivo(Guid id)
     {
         await using var db = factory.Modulo("FESE");
-        return await db.QuerySingleOrDefaultAsync<byte[]>($"SELECT {(acuse ? "ACUSE_PDF" : "ARCHIVO")} FROM dbo.FESE_CARGA WHERE ID_CARGA = @id", new { id })
+        return await db.QuerySingleOrDefaultAsync<byte[]>("SELECT ARCHIVO FROM dbo.FESE_CARGA WHERE ID_CARGA = @id", new { id })
             ?? throw new ArgumentException("El archivo todavía no está disponible.");
     }
 }

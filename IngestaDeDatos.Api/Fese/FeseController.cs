@@ -147,21 +147,24 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
         var anteriores = c.IdCargaBase.HasValue ? await repo.Filas(await repo.Carga(c.IdCargaBase.Value)) : [];
         return File(ExportacionesFese.Diferencias(anteriores, filas), MimeExcel, $"FESE-diferencias-{id}.xlsx");
     }
-    private async Task<(byte[] Pdf, List<DatoFese> Comparativo)> PrepararAcuse(CargaFese c, bool aceptado)
-    {
-        var datos = JsonSerializer.Deserialize<List<DatoFese>>(c.ComparativoJson) ?? [];
-        return (ExportacionesFese.Acuse(c, await repo.Filas(c), datos, await repo.Catalogo(), aceptado), datos);
-    }
     [HttpGet("cargas/{id:guid}/acuse")]
     public async Task<IActionResult> Acuse(Guid id)
     {
-        var c = await Autorizada(id);
+        await Autorizada(id);
+        var (c, filas) = await repo.DatosAcuse(id);
         var entidad = System.Text.RegularExpressions.Regex.Replace(c.Entidad, "[<>:\"/\\\\|?*]", "-").Trim();
         var nombre = $"Acuse FESE - {ExportacionesFese.Mes(c.Periodo.Month)} {c.Periodo.Year} - {entidad}.pdf";
-        if (c.Estado is "ACEPTADA" or "SUSTITUIDA") return File(await repo.Archivo(id, true), "application/pdf", nombre);
-        if (c.Estado != "PENDIENTE") throw new ArgumentException("La carga fue cancelada.");
-        var resultado = await PrepararAcuse(c, false);
-        return File(resultado.Pdf, "application/pdf", nombre);
+        if (c.Estado is not ("PENDIENTE" or "ACEPTADA" or "SUSTITUIDA"))
+            throw new ArgumentException("La carga fue cancelada.");
+        if (filas.Count == 0)
+            throw new ArgumentException("No hay datos conservados para generar este acuse.");
+        List<DatoFese> comparativo = string.IsNullOrWhiteSpace(c.ComparativoJson)
+            ? []
+            : JsonSerializer.Deserialize<List<DatoFese>>(c.ComparativoJson) ?? [];
+        var definitivo = c.Estado is "ACEPTADA" or "SUSTITUIDA";
+        var fecha = c.FechaAceptacion ?? c.FechaCreacion;
+        var pdf = ExportacionesFese.Acuse(c, filas, comparativo, await repo.Catalogo(), definitivo, fecha);
+        return File(pdf, "application/pdf", nombre);
     }
     [HttpPost("cargas/{id:guid}/aceptar")]
     public async Task<IActionResult> Aceptar(Guid id)
@@ -174,8 +177,7 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
         var permiso = await permisos.Efectivos(usuario);
         if (!(c.Tipo == "ACTUALIZACION" ? permiso.HabilitaActualizacion : permiso.HabilitaCarga))
             return StatusCode(403, new { mensaje = "La operación está desactivada. Su carga permanece pendiente; podrá aceptarla al habilitarla nuevamente." });
-        var acuse = await PrepararAcuse(c, true);
-        await repo.Confirmar(id, usuario.IdUsuario, acuse.Pdf, JsonSerializer.Serialize(acuse.Comparativo));
+        await repo.Confirmar(id, usuario.IdUsuario);
         return Ok(new { mensaje = "Entrega aceptada correctamente." });
     }
     [HttpPost("cargas/{id:guid}/cancelar")]
@@ -190,7 +192,7 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
     public async Task<IActionResult> Original(Guid id)
     {
         var c = await Autorizada(id);
-        return File(await repo.Archivo(id, false), "application/octet-stream", c.NombreArchivo);
+        return File(await repo.Archivo(id), "application/octet-stream", c.NombreArchivo);
     }
     [HttpGet("exportar")]
     public async Task<IActionResult> Exportar(int anio, int? idEntidad, int? mes, string? categoria, int? codigo, bool anual = false)

@@ -31,7 +31,7 @@ No se incluyen credenciales ni se han modificado servicios o bases en esta entre
 - `POST /api/fese/cargas/validar` recibe `actualizacion` como campo del formulario (por defecto `false`). La carga inicial admite únicamente el corte y no puede sustituir una entrega aceptada.
 - Una actualización requiere `actualizacion=true` y una entrega aceptada de esa entidad y periodo. La comprobación se repite dentro de la transacción de guardado; se conserva la sustitución con histórico y la protección contra cargas base desactualizadas.
 - Una carga inicial pendiente de un corte que ya cerró no se puede aceptar fuera de su corte.
-- Los nuevos comprobantes siguen el formato institucional mensual: comparativo por categoría, totales, variaciones de al menos 10% en azul y observaciones. La vista previa se identifica como pendiente y no acredita recepción. Los PDF definitivos ya almacenados conservan su contenido original.
+- Los nuevos comprobantes siguen el formato institucional mensual: comparativo por categoría, totales, variaciones de al menos 10% en azul y observaciones. La vista previa se identifica como pendiente y no acredita recepción. Los PDF se generan al descargar usando el comparativo guardado y las filas de la versión solicitada. Ejecute el `03_confirmacion.sql` actualizado antes de iniciar la API.
 
 Actualizar API y front juntos. El ajuste del corte y comprobante no requiere SQL adicional; la gestión de permisos sí requiere la migración indicada abajo.
 
