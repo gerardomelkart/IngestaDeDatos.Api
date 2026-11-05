@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 
 namespace IngestaDeDatos.Api.Fese;
 
@@ -56,9 +55,6 @@ internal sealed class AcuseFese
         doc.y -= 17;
         doc.Parrafo("Nota metodológica: Las variaciones porcentuales iguales o superiores al 10% en valor absoluto se resaltan en color azul para facilitar la identificación de los cambios más significativos respecto del mes anterior.", 8, 11);
         doc.Parrafo("N/D en azul: comparativo no disponible por falta de entrega anterior o denominador cero.", 8, 11);
-        doc.y -= 22;
-        var advertencias = JsonSerializer.Deserialize<List<string>>(carga.Advertencias) ?? [];
-        doc.Parrafo("Observaciones: " + (advertencias.Count == 0 ? "Sin observaciones." : string.Join(" ", advertencias)), 10, 14);
         return doc.Generar();
     }
 

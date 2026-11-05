@@ -84,7 +84,9 @@ Assert(System.Text.Encoding.Latin1.GetString(definitivo).Contains("certifica") &
 Assert(System.Text.Encoding.Latin1.GetString(definitivo).Contains("0 0 1 rg"), "El comprobante resalta variaciones significativas en azul");
 File.WriteAllBytes(Path.Combine(qa, "comprobante.pdf"), definitivo);
 cargaAcuse.Advertencias = System.Text.Json.JsonSerializer.Serialize(Enumerable.Range(1, 80).Select(i => $"Centro de prueba {i}: revise la variación reportada respecto del mes anterior."));
-File.WriteAllBytes(Path.Combine(qa, "observaciones-largas.pdf"), ExportacionesFese.Acuse(cargaAcuse, filasAcuse, [], catalogoAcuse, false));
+var conAdvertencias = ExportacionesFese.Acuse(cargaAcuse, filasAcuse, [], catalogoAcuse, false);
+var textoConAdvertencias = System.Text.Encoding.Latin1.GetString(conAdvertencias);
+Assert(!textoConAdvertencias.Contains("Observaciones:") && !textoConAdvertencias.Contains("Centro de prueba 1: revise"), "El acuse omite las advertencias de validación");
 var formato = Environment.GetEnvironmentVariable("FESE_TEST_FORMATO");
 var rutaCatalogo = Environment.GetEnvironmentVariable("FESE_TEST_CATALOGO");
 if (formato is not null && rutaCatalogo is not null)
