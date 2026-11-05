@@ -42,6 +42,15 @@ hoja.Row(6).Clear();
 hoja.Cell(1, 1).Value = "Año:";
 hoja.Cell(1, 2).Value = 2025;
 Assert(lector.Leer(Guardar(libro), catalogo, "Chiapas", new DateTime(2026, 9, 1)).Errores.Count > 0, "Rechaza periodo declarado distinto");
+hoja.Cell(1, 2).Value = 2026;
+hoja.Cell(2, 1).Value = "Mes:";
+hoja.Cell(2, 2).Value = "Agosto";
+var mesDistinto = lector.Leer(Guardar(libro), catalogo, "Chiapas", new DateTime(2026, 9, 1));
+Assert(mesDistinto.Errores.Count == 0 && mesDistinto.Filas.Count == 1 &&
+    mesDistinto.Advertencias.Any(a => a.Contains("el mes declarado no coincide") && a.Contains("2026-09")),
+    "La diferencia de mes se advierte y permite continuar con el periodo seleccionado");
+hoja.Cell(2, 1).Clear();
+hoja.Cell(2, 2).Clear();
 var u = new IngestaDeDatos.Api.Models.UsuarioInfo { EsNacional = false, IdEntidad = 7 };
 Assert(AccesoFese.Entidad(u, null) == 7, "El enlace conserva su entidad");
 try { AccesoFese.Entidad(u, 1); throw new Exception("Se permitió otra entidad"); }

@@ -77,7 +77,7 @@ public sealed class LectorFese
                 {
                     var mesDeclarado = int.TryParse(valor, out var numeroMes) ? numeroMes : Enumerable.Range(1, 12).FirstOrDefault(i => Normalizar(ExportacionesFese.Mes(i)) == Normalizar(valor));
                     if (mesDeclarado > 0 && mesDeclarado != periodo.Value.Month)
-                        errores.Add($"{hoja.Name}: el mes declarado no coincide con el seleccionado.");
+                        avisos.Add($"{hoja.Name}: el mes declarado no coincide con el seleccionado. La carga se registrará en el periodo {periodo.Value:yyyy-MM}.");
                 }
                 if (entidadEsperada is not null && etiqueta is "ENTIDAD" or "ESTADO" or "NOMBRE DE LA ENTIDAD FEDERATIVA")
                 {
