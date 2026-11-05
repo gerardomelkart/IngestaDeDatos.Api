@@ -20,15 +20,19 @@ var resultado = lector.Leer(Guardar(libro), catalogo);
 Assert(resultado.Errores.Count == 0 && resultado.Filas.Single().Total == 12, "Lee encabezados desplazados y nombre libre de hoja");
 hoja.Cell(5, 5).Clear();
 
-Assert(lector.Leer(Guardar(libro), catalogo).Errores.Count > 0, "Vacío no se convierte en cero");
+resultado = lector.Leer(Guardar(libro), catalogo);
+Assert(resultado.Errores.Count == 0 && resultado.Filas.Single().Total == 0 && resultado.Advertencias.Any(a => a.Contains("se registró como 0")), "Cantidad normalizada a cero con advertencia");
 hoja.Cell(5, 5).Value = -1;
 
-Assert(lector.Leer(Guardar(libro), catalogo).Errores.Count > 0, "Rechaza negativos");
+resultado = lector.Leer(Guardar(libro), catalogo);
+Assert(resultado.Errores.Count == 0 && resultado.Filas.Single().Total == 0 && resultado.Advertencias.Any(a => a.Contains("se registró como 0")), "Cantidad normalizada a cero con advertencia");
 hoja.Cell(5, 5).Value = 1.5;
 
-Assert(lector.Leer(Guardar(libro), catalogo).Errores.Count > 0, "Rechaza decimales");
+resultado = lector.Leer(Guardar(libro), catalogo);
+Assert(resultado.Errores.Count == 0 && resultado.Filas.Single().Total == 0 && resultado.Advertencias.Any(a => a.Contains("se registró como 0")), "Cantidad normalizada a cero con advertencia");
 hoja.Cell(5, 5).Value = "1,5";
-Assert(lector.Leer(Guardar(libro), catalogo).Errores.Count > 0, "No interpreta decimal con coma como quince");
+resultado = lector.Leer(Guardar(libro), catalogo);
+Assert(resultado.Errores.Count == 0 && resultado.Filas.Single().Total == 0 && resultado.Advertencias.Any(a => a.Contains("se registró como 0")), "Cantidad normalizada a cero con advertencia");
 hoja.Cell(5, 5).Value = 12;
 hoja.Cell(6, 3).Value = "Centro ficticio";
 hoja.Cell(6, 4).Value = 10101;

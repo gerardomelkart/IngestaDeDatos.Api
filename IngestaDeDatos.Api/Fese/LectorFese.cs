@@ -134,8 +134,8 @@ public sealed class LectorFese
                 var texto = hoja.Cell(n, colTotal).GetString().Trim();
                 if (!decimal.TryParse(texto, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var total) || total < 0 || total != decimal.Truncate(total) || total > 999999999999L)
                 {
-                    errores.Add($"{hoja.Name}, fila {n}: cantidad vacía o inválida; use un entero no negativo de hasta 12 dígitos.");
-                    continue;
+                    avisos.Add($"{hoja.Name}, fila {n}: cantidad vacía o inválida; se registró como 0.");
+                    total = 0;
                 }
                 if (!vistas.Add((Normalizar(centro), codigo)))
                 {
