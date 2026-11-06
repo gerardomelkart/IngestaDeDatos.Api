@@ -53,23 +53,29 @@ internal static class ExtractoRdsFese
                         fila.Region, fila.Estado, fila.Centro, fila.Tipo, fila.Incidente,
                         fila.Total.ToString(CultureInfo.InvariantCulture), fila.Periodo.Month.ToString(CultureInfo.InvariantCulture),
                         fila.MesLargo ?? mes, fila.FechaOriginal ?? fila.Periodo.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-                    }.Select(valor => "\"" + valor.Replace("\"", "\"\"") + "\"")));
+                    }.Select((valor, indice) => indice is 1 or 8 or 9 ? valor : "\"" + valor.Replace("\"", "\"\"") + "\"")));
                 }
             }
+
+            var script = Path.Combine(carpeta.FullName, "generar.R");
+            await File.WriteAllTextAsync(script, """
+                args <- commandArgs(trailingOnly = TRUE)
+                fese <- tryCatch(
+                  read.csv(args[1], encoding = "UTF-8", na.strings = character(),
+                    colClasses = c("character", "numeric", rep("character", 6),
+                                   "numeric", "numeric", "character", "character")),
+                  error = function(e) quit(status = 20L))
+                attr(fese, "datalabel") <- ""
+                attr(fese, "var.labels") <- rep("", ncol(fese))
+                tryCatch(saveRDS(fese, args[2], version = 2),
+                         error = function(e) quit(status = 21L))
+                """, cancelacion);
 
             var inicio = new ProcessStartInfo(ejecutable)
             {
                 UseShellExecute = false
             };
-            foreach (var argumento in new[] { "--vanilla", "-e", """
-                args <- commandArgs(trailingOnly = TRUE)
-                fese <- read.csv(args[1], fileEncoding = "UTF-8", na.strings = character(),
-                  colClasses = c("character", "numeric", rep("character", 6),
-                                 "numeric", "numeric", "character", "character"))
-                attr(fese, "datalabel") <- ""
-                attr(fese, "var.labels") <- rep("", ncol(fese))
-                saveRDS(fese, args[2], version = 2)
-                """, entrada, salida })
+            foreach (var argumento in new[] { "--vanilla", script, entrada, salida })
                 inicio.ArgumentList.Add(argumento);
 
             using var proceso = Process.Start(inicio) ?? throw new InvalidOperationException("No se pudo iniciar Rscript.");
@@ -87,7 +93,12 @@ internal static class ExtractoRdsFese
             }
 
             if (proceso.ExitCode != 0)
-                throw new InvalidOperationException("Rscript no pudo generar el extracto FESE.");
+                throw new InvalidOperationException(proceso.ExitCode switch
+                {
+                    20 => "Rscript no pudo leer el CSV temporal de FESE.",
+                    21 => "Rscript no pudo escribir el RDS temporal de FESE.",
+                    _ => $"Rscript terminó con código {proceso.ExitCode}."
+                });
 
             return await File.ReadAllBytesAsync(salida, cancelacion);
         }
