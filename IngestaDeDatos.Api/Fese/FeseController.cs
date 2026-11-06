@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text;
 using Dapper;
 using IngestaDeDatos.Api.Configuration;
 using IngestaDeDatos.Api.Data;
@@ -228,7 +230,7 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
     private async Task<List<FilaRdsFese>> FilasInforme(DateTime inicio, DateTime fin, CancellationToken ct, int[]? anios = null)
     {
         await using var db = factory.Modulo("FESE");
-        return (await db.QueryAsync<FilaRdsFese>(new CommandDefinition("""
+        var bloques = await db.QueryAsync<byte[]>(new CommandDefinition("""
             SET NOCOUNT ON;
             SELECT ID_CARGA, ID_ENTIDAD, PERIODO INTO #WebInforme
             FROM dbo.FESE_CARGA
@@ -253,6 +255,7 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
 
             SELECT o.Codigo, o.Procedencia, o.Region, o.Estado, o.Centro, o.Tipo, o.Incidente, o.Total,
                    DATEFROMPARTS(o.Anio, o.Mes, 1) Periodo, o.MesLargo, o.FechaOriginal
+            INTO #FilasInforme
             FROM dbo.FESE_RDS_ORIGEN o
             JOIN dbo.FESE_ENTIDAD e ON e.NOMBRE COLLATE Latin1_General_100_CI_AI = o.Estado COLLATE Latin1_General_100_CI_AI
             WHERE o.Anio BETWEEN YEAR(@inicio) AND YEAR(DATEADD(day, -1, @fin))
@@ -267,7 +270,33 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
             FROM dbo.FESE_VW_DATOS d JOIN #WebInforme w ON w.ID_CARGA = d.ID_CARGA
             LEFT JOIN #EntidadesInforme e ON e.ID_ENTIDAD = d.ID_ENTIDAD
             OPTION (RECOMPILE);
-            """, new { inicio, fin, todos = anios is null, anios = anios ?? Array.Empty<int>() }, commandTimeout: 180, cancellationToken: ct))).AsList();
+
+            CREATE CLUSTERED INDEX IX_FilasInforme_Periodo ON #FilasInforme(Periodo);
+
+            -- Un bloque gzip por mes evita enviar cada fila por separado.
+            SELECT COMPRESS((
+                SELECT f.Codigo, f.Procedencia, f.Region, f.Estado, f.Centro, f.Tipo,
+                       f.Incidente, f.Total, f.Periodo, f.MesLargo, f.FechaOriginal
+                FROM #FilasInforme f
+                WHERE f.Periodo = m.Periodo
+                FOR JSON PATH
+            ))
+            FROM (SELECT DISTINCT Periodo FROM #FilasInforme) m
+            ORDER BY m.Periodo;
+            """, new { inicio, fin, todos = anios is null, anios = anios ?? Array.Empty<int>() }, commandTimeout: 180, cancellationToken: ct));
+
+        var filas = new List<FilaRdsFese>();
+        foreach (var bloque in bloques)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var comprimido = new MemoryStream(bloque);
+            using var gzip = new GZipStream(comprimido, CompressionMode.Decompress);
+            using var json = Encoding.CreateTranscodingStream(gzip, Encoding.Unicode, Encoding.UTF8);
+            var mes = await JsonSerializer.DeserializeAsync<List<FilaRdsFese>>(json, cancellationToken: ct)
+                ?? throw new InvalidOperationException("SQL devolvió un bloque de informe vacío.");
+            filas.AddRange(mes);
+        }
+        return filas;
     }
 
     private static int[] ValidarAniosInforme(int[] anios)
