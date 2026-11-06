@@ -15,6 +15,33 @@ internal static class PlantillaCniedtFese
         var clave => clave
     };
 
+    public static int LeerAnio(MemoryStream archivo)
+    {
+        try
+        {
+            using var documento = SpreadsheetDocument.Open(archivo, false);
+            var libro = documento.WorkbookPart;
+            var hoja = libro?.Workbook.Descendants<Sheet>().SingleOrDefault(x => x.Name?.Value == "Llamadas 911");
+            if (libro is null || hoja?.Id?.Value is not string id)
+                throw new ArgumentException("La plantilla debe incluir la pestaña Llamadas 911.");
+            var parte = (WorksheetPart)libro.GetPartById(id);
+            var celda = parte.Worksheet.Descendants<Cell>().FirstOrDefault(x => x.CellReference?.Value == "A1");
+            var titulo = celda?.InnerText ?? "";
+            if (celda?.DataType?.Value == CellValues.SharedString
+                && int.TryParse(titulo, out var indice))
+                titulo = libro.SharedStringTablePart?.SharedStringTable.Elements<SharedStringItem>()
+                    .ElementAtOrDefault(indice)?.InnerText ?? "";
+            var coincidencias = System.Text.RegularExpressions.Regex.Matches(titulo, @"\b(?:20[0-9]{2}|2100)\b");
+            if (coincidencias.Count != 1)
+                throw new ArgumentException("Indique el año en el encabezado A1 de Llamadas 911.");
+            return int.Parse(coincidencias[0].Value, CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex) when (ex is OpenXmlPackageException or IOException or System.Xml.XmlException)
+        {
+            throw new ArgumentException("No se pudo abrir la plantilla CNIEDT.", ex);
+        }
+    }
+
     public static byte[] Llenar(MemoryStream archivo, List<DatoFese> datos,
         List<CargaFese> cargas, List<EntidadFese> entidades, DateTime periodo)
     {
