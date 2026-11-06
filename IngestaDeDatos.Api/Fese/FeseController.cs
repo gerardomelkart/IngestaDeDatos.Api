@@ -243,7 +243,7 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
             SELECT o.Codigo, o.Procedencia, o.Region, o.Estado, o.Centro, o.Tipo, o.Incidente, o.Total,
                    DATEFROMPARTS(o.Anio, o.Mes, 1) Periodo, o.MesLargo, o.FechaOriginal
             FROM dbo.FESE_RDS_ORIGEN o
-            JOIN EntidadesOrigen e ON e.Estado COLLATE Latin1_General_100_CI_AI = o.Estado COLLATE Latin1_General_100_CI_AI
+            JOIN dbo.FESE_ENTIDAD e ON e.NOMBRE COLLATE Latin1_General_100_CI_AI = o.Estado COLLATE Latin1_General_100_CI_AI
             WHERE o.Anio BETWEEN YEAR(@inicio) AND YEAR(@fin)
                 AND (@todos = 1 OR o.Anio IN @anios)
                 AND DATEFROMPARTS(o.Anio, o.Mes, 1) >= @inicio AND DATEFROMPARTS(o.Anio, o.Mes, 1) < @fin
@@ -275,9 +275,17 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
         var ejecutable = ExtractoRdsFese.BuscarEjecutable();
         if (ejecutable is null)
             return StatusCode(503, new { mensaje = "Rscript no está disponible en el servidor. Configure FESE_RSCRIPT con la ruta completa del ejecutable." });
+        var logger = HttpContext.RequestServices.GetRequiredService<ILogger<FeseController>>();
+        var reloj = System.Diagnostics.Stopwatch.StartNew();
         var filas = await FilasInforme(inicio, corte.AddMonths(1), ct, seleccion);
+        logger.LogInformation("Extracto RDS {Solicitud}: SQL terminó en {Milisegundos} ms con {Filas} filas.",
+            HttpContext.TraceIdentifier, reloj.ElapsedMilliseconds, filas.Count);
         if (filas.Count == 0) return NotFound(new { mensaje = "El rango no tiene datos." });
-        return File(await ExtractoRdsFese.Generar(filas, ejecutable, ct), "application/octet-stream", $"fese-{inicio:yyyy-MM}-{corte:yyyy-MM}.rds");
+        reloj.Restart();
+        var archivo = await ExtractoRdsFese.Generar(filas, ejecutable, ct);
+        logger.LogInformation("Extracto RDS {Solicitud}: generación terminó en {Milisegundos} ms con {Bytes} bytes.",
+            HttpContext.TraceIdentifier, reloj.ElapsedMilliseconds, archivo.Length);
+        return File(archivo, "application/octet-stream", $"fese-{inicio:yyyy-MM}-{corte:yyyy-MM}.rds");
     }
 
     [HttpGet("rep-anual")]
