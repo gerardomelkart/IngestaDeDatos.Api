@@ -51,8 +51,15 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
         await using var db = factory.Auth();
         var roles = await db.QueryAsync("SELECT CLAVE clave, NOMBRE nombre, NACIONAL_OBLIGATORIO nacionalObligatorio, PUEDE_CARGAR puedeCargar FROM dbo.CAT_ROL WHERE HABILITADO = 1 ORDER BY ORDEN");
         var meses = await db.QueryAsync("SELECT ID_MES id, NOMBRE nombre FROM dbo.CAT_MES ORDER BY ID_MES");
-        var corte = PoliticaEntregaFese.Corte(RepositorioFese.Ahora().Date);
-        return Ok(new { requiereCambioPassword = await password.Requiere(usuario.IdUsuario), passwordMinimo = reglas.Value.PasswordMinimo, permisos = await permisos.Efectivos(usuario), corte = new { anio = corte.Year, mes = corte.Month }, usuario, entidades = (await repo.Entidades()).Where(e => usuario.EsNacional || e.IdEntidad == usuario.IdEntidad), incidentes = await repo.Catalogo(), roles, meses });
+        var hoy = RepositorioFese.Ahora().Date;
+        await using var dbFese = factory.Modulo("FESE");
+        var anios = await dbFese.QueryAsync<int>("""
+            SELECT DISTINCT YEAR(PERIODO) FROM dbo.FESE_CARGA
+            WHERE (@entidad IS NULL OR ID_ENTIDAD = @entidad)
+            """, new { entidad = usuario.EsNacional ? (int?)null : usuario.IdEntidad });
+        var aniosDisponibles = anios.Append(hoy.Year).Distinct().OrderByDescending(anio => anio);
+        var corte = PoliticaEntregaFese.Corte(hoy);
+        return Ok(new { requiereCambioPassword = await password.Requiere(usuario.IdUsuario), passwordMinimo = reglas.Value.PasswordMinimo, permisos = await permisos.Efectivos(usuario), corte = new { anio = corte.Year, mes = corte.Month }, usuario, entidades = (await repo.Entidades()).Where(e => usuario.EsNacional || e.IdEntidad == usuario.IdEntidad), incidentes = await repo.Catalogo(), roles, meses, anios = aniosDisponibles });
     }
     public sealed record CambioPassword(string? Actual, string? Nueva);
     [HttpPost("password")]
