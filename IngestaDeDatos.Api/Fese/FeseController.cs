@@ -161,6 +161,11 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
         List<DatoFese> comparativo = string.IsNullOrWhiteSpace(c.ComparativoJson)
             ? []
             : JsonSerializer.Deserialize<List<DatoFese>>(c.ComparativoJson) ?? [];
+        if (comparativo.Count == 0)
+        {
+            var anterior = c.Periodo.AddMonths(-1);
+            comparativo = await repo.Datos(anterior.Year, c.IdEntidad, anterior.Month);
+        }
         var definitivo = c.Estado is "ACEPTADA" or "SUSTITUIDA";
         var fecha = c.FechaAceptacion ?? c.FechaCreacion;
         var pdf = ExportacionesFese.Acuse(c, filas, comparativo, await repo.Catalogo(), definitivo, fecha);
