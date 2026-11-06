@@ -229,31 +229,44 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
     {
         await using var db = factory.Modulo("FESE");
         return (await db.QueryAsync<FilaRdsFese>(new CommandDefinition("""
-            WITH EntidadesOrigen AS (
-                SELECT e.ID_ENTIDAD, MIN(o.Region) Region, MIN(o.Estado) Estado
+            SET NOCOUNT ON;
+            SELECT ID_CARGA, ID_ENTIDAD, PERIODO INTO #WebInforme
+            FROM dbo.FESE_CARGA
+            WHERE ESTADO = 'ACEPTADA' AND ID_USUARIO <> 0
+                AND PERIODO >= @inicio AND PERIODO < @fin
+                AND (@todos = 1 OR YEAR(PERIODO) IN @anios);
+
+            CREATE TABLE #EntidadesInforme (
+                ID_ENTIDAD int PRIMARY KEY,
+                Region nvarchar(100) NULL,
+                Estado nvarchar(100) NULL
+            );
+            IF EXISTS (SELECT 1 FROM #WebInforme)
+            BEGIN
+                INSERT #EntidadesInforme (ID_ENTIDAD, Region, Estado)
+                SELECT e.ID_ENTIDAD, MIN(o.Region), MIN(o.Estado)
                 FROM dbo.FESE_RDS_ORIGEN o
                 JOIN dbo.FESE_ENTIDAD e ON e.NOMBRE COLLATE Latin1_General_100_CI_AI = o.Estado COLLATE Latin1_General_100_CI_AI
-                GROUP BY e.ID_ENTIDAD
-            ), Web AS (
-                SELECT ID_CARGA, ID_ENTIDAD, PERIODO FROM dbo.FESE_CARGA
-                WHERE ESTADO = 'ACEPTADA' AND ID_USUARIO <> 0
-                    AND PERIODO >= @inicio AND PERIODO < @fin
-                    AND (@todos = 1 OR YEAR(PERIODO) IN @anios)
-            )
+                WHERE EXISTS (SELECT 1 FROM #WebInforme w WHERE w.ID_ENTIDAD = e.ID_ENTIDAD)
+                GROUP BY e.ID_ENTIDAD;
+            END;
+
             SELECT o.Codigo, o.Procedencia, o.Region, o.Estado, o.Centro, o.Tipo, o.Incidente, o.Total,
                    DATEFROMPARTS(o.Anio, o.Mes, 1) Periodo, o.MesLargo, o.FechaOriginal
             FROM dbo.FESE_RDS_ORIGEN o
             JOIN dbo.FESE_ENTIDAD e ON e.NOMBRE COLLATE Latin1_General_100_CI_AI = o.Estado COLLATE Latin1_General_100_CI_AI
-            WHERE o.Anio BETWEEN YEAR(@inicio) AND YEAR(@fin)
+            WHERE o.Anio BETWEEN YEAR(@inicio) AND YEAR(DATEADD(day, -1, @fin))
                 AND (@todos = 1 OR o.Anio IN @anios)
-                AND DATEFROMPARTS(o.Anio, o.Mes, 1) >= @inicio AND DATEFROMPARTS(o.Anio, o.Mes, 1) < @fin
-                AND NOT EXISTS (SELECT 1 FROM Web w WHERE w.ID_ENTIDAD = e.ID_ENTIDAD AND w.PERIODO = DATEFROMPARTS(o.Anio, o.Mes, 1))
+                AND (o.Anio > YEAR(@inicio) OR o.Mes >= MONTH(@inicio))
+                AND (o.Anio < YEAR(@fin) OR o.Mes < MONTH(@fin))
+                AND NOT EXISTS (SELECT 1 FROM #WebInforme w WHERE w.ID_ENTIDAD = e.ID_ENTIDAD AND w.PERIODO = DATEFROMPARTS(o.Anio, o.Mes, 1))
             UNION ALL
             SELECT CONVERT(nvarchar(64), d.CODIGO), CASE WHEN d.PROCEDENTE = 1 THEN N'Procedentes' ELSE N'Improcedentes' END,
                    COALESCE(e.Region, N''), COALESCE(e.Estado, d.ENTIDAD), d.CENTRO, d.CATEGORIA, d.INCIDENTE, d.TOTAL,
                    d.PERIODO, NULL, NULL
-            FROM dbo.FESE_VW_DATOS d JOIN Web w ON w.ID_CARGA = d.ID_CARGA
-            LEFT JOIN EntidadesOrigen e ON e.ID_ENTIDAD = d.ID_ENTIDAD
+            FROM dbo.FESE_VW_DATOS d JOIN #WebInforme w ON w.ID_CARGA = d.ID_CARGA
+            LEFT JOIN #EntidadesInforme e ON e.ID_ENTIDAD = d.ID_ENTIDAD
+            OPTION (RECOMPILE);
             """, new { inicio, fin, todos = anios is null, anios = anios ?? Array.Empty<int>() }, commandTimeout: 180, cancellationToken: ct))).AsList();
     }
 
