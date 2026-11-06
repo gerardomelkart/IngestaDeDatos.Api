@@ -9,7 +9,30 @@ internal sealed record FilaRdsFese(string Codigo, string Procedencia, string Reg
 
 internal static class ExtractoRdsFese
 {
-    public static async Task<byte[]> Generar(IEnumerable<FilaRdsFese> filas, CancellationToken cancelacion)
+    public static string? BuscarEjecutable()
+    {
+        var configurado = Environment.GetEnvironmentVariable("FESE_RSCRIPT");
+        if (!string.IsNullOrWhiteSpace(configurado))
+            return Path.IsPathFullyQualified(configurado) && File.Exists(configurado) ? configurado : null;
+
+        var nombre = OperatingSystem.IsWindows() ? "Rscript.exe" : "Rscript";
+        foreach (var carpeta in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
+        {
+            if (!Path.IsPathFullyQualified(carpeta)) continue;
+            var ruta = Path.Combine(carpeta, nombre);
+            if (File.Exists(ruta)) return ruta;
+        }
+
+        if (!OperatingSystem.IsWindows()) return null;
+        var instalaciones = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "R");
+        if (!Directory.Exists(instalaciones)) return null;
+        return Directory.EnumerateDirectories(instalaciones, "R-*")
+            .OrderByDescending(ruta => Version.TryParse(Path.GetFileName(ruta)[2..], out var version) ? version : new Version())
+            .Select(ruta => Path.Combine(ruta, "bin", nombre))
+            .FirstOrDefault(File.Exists);
+    }
+
+    public static async Task<byte[]> Generar(IEnumerable<FilaRdsFese> filas, string ejecutable, CancellationToken cancelacion)
     {
         var carpeta = Directory.CreateTempSubdirectory("fese-rds-");
         try
@@ -34,7 +57,7 @@ internal static class ExtractoRdsFese
                 }
             }
 
-            var inicio = new ProcessStartInfo(Environment.GetEnvironmentVariable("FESE_RSCRIPT") ?? "Rscript")
+            var inicio = new ProcessStartInfo(ejecutable)
             {
                 UseShellExecute = false
             };

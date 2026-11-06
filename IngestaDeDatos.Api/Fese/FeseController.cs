@@ -272,9 +272,12 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
         var inicio = seleccion is null ? MesInforme(desde) : new DateTime(seleccion[0], 1, 1);
         var corte = seleccion is null ? MesInforme(hasta) : new DateTime(seleccion[^1], 12, 1);
         if (inicio > corte) throw new ArgumentException("El mes inicial debe ser anterior o igual al final.");
+        var ejecutable = ExtractoRdsFese.BuscarEjecutable();
+        if (ejecutable is null)
+            return StatusCode(503, new { mensaje = "Rscript no está disponible en el servidor. Configure FESE_RSCRIPT con la ruta completa del ejecutable." });
         var filas = await FilasInforme(inicio, corte.AddMonths(1), ct, seleccion);
         if (filas.Count == 0) return NotFound(new { mensaje = "El rango no tiene datos." });
-        return File(await ExtractoRdsFese.Generar(filas, ct), "application/octet-stream", $"fese-{inicio:yyyy-MM}-{corte:yyyy-MM}.rds");
+        return File(await ExtractoRdsFese.Generar(filas, ejecutable, ct), "application/octet-stream", $"fese-{inicio:yyyy-MM}-{corte:yyyy-MM}.rds");
     }
 
     [HttpGet("rep-anual")]
