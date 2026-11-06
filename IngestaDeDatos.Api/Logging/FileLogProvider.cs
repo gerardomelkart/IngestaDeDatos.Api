@@ -10,14 +10,14 @@ public sealed class FileLogProvider : ILoggerProvider
     private readonly string directory;
     private readonly long maximumBytes;
     private readonly int retentionDays;
-    private StreamWriter? writer;
-    private DateOnly currentDay;
-    private long currentBytes;
-    private int sequence;
+    private readonly IHttpContextAccessor? requests;
+    private readonly FileState ddcp = new("ddcp");
+    private readonly FileState fese = new("fese");
     private bool disposed;
 
-    public FileLogProvider(IConfiguration configuration, string contentRoot)
+    public FileLogProvider(IConfiguration configuration, string contentRoot, IHttpContextAccessor? requests = null)
     {
+        this.requests = requests;
         var configuredDirectory = configuration["Logs:Directory"] ?? throw new InvalidOperationException("Falta Logs:Directory.");
         directory = Path.GetFullPath(configuredDirectory, contentRoot);
         maximumBytes = configuration.GetValue<long>("Logs:MaxFileSizeMB") * 1024 * 1024;
@@ -55,6 +55,10 @@ public sealed class FileLogProvider : ILoggerProvider
         var now = DateTimeOffset.UtcNow;
         var line = JsonSerializer.Serialize(new { fechaUtc = now, nivel = level.ToString(), categoria = category, evento = eventId.Id, mensaje = message, propiedades = properties, excepcion = diagnostic });
         var bytes = Encoding.UTF8.GetByteCount(line + Environment.NewLine);
+        var path = requests?.HttpContext?.Request.Path;
+        var file = path?.StartsWithSegments("/api/fese") == true
+            || category.StartsWith("IngestaDeDatos.Api.Fese.", StringComparison.Ordinal)
+            ? fese : ddcp;
         lock (gate)
         {
             if (disposed)
@@ -64,55 +68,55 @@ public sealed class FileLogProvider : ILoggerProvider
             try
             {
                 var day = DateOnly.FromDateTime(now.UtcDateTime);
-                if (writer is null || day != currentDay || currentBytes + bytes > maximumBytes)
+                if (file.Writer is null || day != file.Day || file.Bytes + bytes > maximumBytes)
                 {
-                    OpenFile(day, bytes);
+                    OpenFile(file, day, bytes);
                 }
-                writer!.WriteLine(line);
-                writer.Flush();
-                currentBytes += bytes;
+                file.Writer!.WriteLine(line);
+                file.Writer.Flush();
+                file.Bytes += bytes;
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
-                writer?.Dispose();
-                writer = null;
+                file.Writer?.Dispose();
+                file.Writer = null;
                 Console.Error.WriteLine($"No se pudo escribir el log ({error.GetType().Name}). Evento: {line}");
             }
         }
     }
 
-    private void OpenFile(DateOnly day, int incomingBytes)
+    private void OpenFile(FileState file, DateOnly day, int incomingBytes)
     {
-        writer?.Dispose();
-        writer = null;
-        if (currentDay != day)
+        file.Writer?.Dispose();
+        file.Writer = null;
+        if (file.Day != day)
         {
-            currentDay = day;
-            sequence = 0;
-            RemoveExpiredFiles(day);
+            file.Day = day;
+            file.Sequence = 0;
+            RemoveExpiredFiles(file.Prefix, day);
         }
         while (true)
         {
-            var path = Path.Combine(directory, $"ddcp-{day:yyyy-MM-dd}-{sequence:D3}.log");
+            var path = Path.Combine(directory, $"{file.Prefix}-{day:yyyy-MM-dd}-{file.Sequence:D3}.log");
             var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
             if (stream.Length == 0 || stream.Length + incomingBytes <= maximumBytes)
             {
-                currentBytes = stream.Length;
+                file.Bytes = stream.Length;
                 stream.Seek(0, SeekOrigin.End);
-                writer = new StreamWriter(stream, new UTF8Encoding(false));
+                file.Writer = new StreamWriter(stream, new UTF8Encoding(false));
                 return;
             }
             stream.Dispose();
-            sequence++;
+            file.Sequence++;
         }
     }
 
-    private void RemoveExpiredFiles(DateOnly today)
+    private void RemoveExpiredFiles(string prefix, DateOnly today)
     {
-        foreach (var path in Directory.EnumerateFiles(directory, "ddcp-*.log"))
+        foreach (var path in Directory.EnumerateFiles(directory, $"{prefix}-*.log"))
         {
             var name = Path.GetFileName(path);
-            if (name.Length < 19 || !DateOnly.TryParseExact(name.Substring(5, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day) || day > today.AddDays(-retentionDays))
+            if (name.Length < prefix.Length + 15 || !DateOnly.TryParseExact(name.Substring(prefix.Length + 1, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day) || day > today.AddDays(-retentionDays))
             {
                 continue;
             }
@@ -132,9 +136,18 @@ public sealed class FileLogProvider : ILoggerProvider
         lock (gate)
         {
             disposed = true;
-            writer?.Dispose();
-            writer = null;
+            ddcp.Writer?.Dispose();
+            fese.Writer?.Dispose();
         }
+    }
+
+    private sealed class FileState(string prefix)
+    {
+        public string Prefix { get; } = prefix;
+        public StreamWriter? Writer { get; set; }
+        public DateOnly Day { get; set; }
+        public long Bytes { get; set; }
+        public int Sequence { get; set; }
     }
 
     private sealed class FileLogger(FileLogProvider provider, string category) : ILogger

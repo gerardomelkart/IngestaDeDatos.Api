@@ -9,7 +9,9 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
-using var fileLogs = new FileLogProvider(builder.Configuration, builder.Environment.ContentRootPath);
+var requests = new HttpContextAccessor();
+builder.Services.AddSingleton<IHttpContextAccessor>(requests);
+using var fileLogs = new FileLogProvider(builder.Configuration, builder.Environment.ContentRootPath, requests);
 builder.Logging.AddProvider(fileLogs);
 builder.Logging.AddFilter<FileLogProvider>((category, level) => category?.StartsWith("IngestaDeDatos.Api", StringComparison.Ordinal) == true && level >= LogLevel.Information);
 using var startupFactory = LoggerFactory.Create(logging => logging.AddConsole().AddProvider(fileLogs));
