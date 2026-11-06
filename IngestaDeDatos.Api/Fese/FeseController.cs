@@ -209,15 +209,97 @@ public sealed class FeseController(AccesoFese acceso, RepositorioFese repo, Perm
         var datos = (await repo.Datos(anio, entidad, mes)).Where(x => (string.IsNullOrEmpty(categoria) || x.Categoria == categoria) && (!codigo.HasValue || x.Codigo == codigo));
         return File(ExportacionesFese.Excel(datos, anual), MimeExcel, $"FESE-{anio}-{(anual ? "anual" : "consulta")}.xlsx");
     }
+    private static DateTime MesInforme(string? texto)
+    {
+        if (!DateTime.TryParseExact(texto + "-01", "yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var fecha)
+            || fecha.Year is < 2000 or > 2100)
+            throw new ArgumentException("Seleccione un mes válido.");
+        return fecha;
+    }
+
+    private async Task<List<FilaRdsFese>> FilasInforme(DateTime inicio, DateTime fin, CancellationToken ct)
+    {
+        await using var db = factory.Modulo("FESE");
+        return (await db.QueryAsync<FilaRdsFese>(new CommandDefinition("""
+            WITH EntidadesOrigen AS (
+                SELECT e.ID_ENTIDAD, MIN(o.Region) Region, MIN(o.Estado) Estado
+                FROM dbo.FESE_RDS_ORIGEN o
+                JOIN dbo.FESE_ENTIDAD e ON e.NOMBRE COLLATE Latin1_General_100_CI_AI = o.Estado COLLATE Latin1_General_100_CI_AI
+                GROUP BY e.ID_ENTIDAD
+            ), Web AS (
+                SELECT ID_CARGA, ID_ENTIDAD, PERIODO FROM dbo.FESE_CARGA
+                WHERE ESTADO = 'ACEPTADA' AND ID_USUARIO <> 0
+                    AND PERIODO >= @inicio AND PERIODO < @fin
+            )
+            SELECT o.Codigo, o.Procedencia, o.Region, o.Estado, o.Centro, o.Tipo, o.Incidente, o.Total,
+                   DATEFROMPARTS(o.Anio, o.Mes, 1) Periodo, o.MesLargo, o.FechaOriginal
+            FROM dbo.FESE_RDS_ORIGEN o
+            JOIN EntidadesOrigen e ON e.Estado COLLATE Latin1_General_100_CI_AI = o.Estado COLLATE Latin1_General_100_CI_AI
+            WHERE o.Anio BETWEEN YEAR(@inicio) AND YEAR(@fin)
+                AND DATEFROMPARTS(o.Anio, o.Mes, 1) >= @inicio AND DATEFROMPARTS(o.Anio, o.Mes, 1) < @fin
+                AND NOT EXISTS (SELECT 1 FROM Web w WHERE w.ID_ENTIDAD = e.ID_ENTIDAD AND w.PERIODO = DATEFROMPARTS(o.Anio, o.Mes, 1))
+            UNION ALL
+            SELECT CONVERT(nvarchar(64), d.CODIGO), CASE WHEN d.PROCEDENTE = 1 THEN N'Procedentes' ELSE N'Improcedentes' END,
+                   COALESCE(e.Region, N''), COALESCE(e.Estado, d.ENTIDAD), d.CENTRO, d.CATEGORIA, d.INCIDENTE, d.TOTAL,
+                   d.PERIODO, NULL, NULL
+            FROM dbo.FESE_VW_DATOS d JOIN Web w ON w.ID_CARGA = d.ID_CARGA
+            LEFT JOIN EntidadesOrigen e ON e.ID_ENTIDAD = d.ID_ENTIDAD
+            """, new { inicio, fin }, commandTimeout: 180, cancellationToken: ct))).AsList();
+    }
+
+    [HttpGet("extracto-rds")]
+    public async Task<IActionResult> ExtractoRds(string? desde, string? hasta, CancellationToken ct)
+    {
+        if (!(await acceso.Actual(User)).EsNacional)
+            throw new UnauthorizedAccessException("El extracto requiere alcance nacional.");
+        var inicio = MesInforme(desde);
+        var corte = MesInforme(hasta);
+        if (inicio > corte) throw new ArgumentException("El mes inicial debe ser anterior o igual al final.");
+        var filas = await FilasInforme(inicio, corte.AddMonths(1), ct);
+        if (filas.Count == 0) return NotFound(new { mensaje = "El rango no tiene datos." });
+        return File(await ExtractoRdsFese.Generar(filas, ct), "application/octet-stream", $"fese-{inicio:yyyy-MM}-{corte:yyyy-MM}.rds");
+    }
+
+    [HttpGet("rep-anual")]
+    public async Task<IActionResult> RepAnual(string? hasta, CancellationToken ct)
+    {
+        if (!(await acceso.Actual(User)).EsNacional)
+            throw new UnauthorizedAccessException("El reporte requiere alcance nacional.");
+        var corte = MesInforme(hasta);
+        var filas = await FilasInforme(new DateTime(2000, 1, 1), corte.AddMonths(1), ct);
+        if (filas.Count == 0) return NotFound(new { mensaje = "El corte no tiene datos." });
+        return File(InformeAnualFese.Generar(filas, ct), MimeExcel, $"Rep_anual{corte:yyyy-MM}.xlsx");
+    }
+
     [HttpGet("cniedt")]
     public async Task<IActionResult> Cniedt(int anio)
     {
         Anio(anio);
-        var u = await acceso.Actual(User);
-        if (!u.EsNacional) throw new UnauthorizedAccessException("El formato nacional requiere alcance nacional.");
+        if (!(await acceso.Actual(User)).EsNacional)
+            throw new UnauthorizedAccessException("El formato nacional requiere alcance nacional.");
         var nacional = await repo.Nacional(anio);
-        return File(ExportacionesFese.Cniedt(nacional.Datos, nacional.Cargas, nacional.Entidades, anio), MimeExcel, $"Formato-CNIEDT-{anio}.xlsx");
+        return File(ExportacionesFese.Cniedt(nacional.Datos, nacional.Cargas, nacional.Entidades, anio),
+            MimeExcel, $"Formato-CNIEDT-{anio}.xlsx");
     }
+
+    [HttpPost("cniedt")]
+    [RequestSizeLimit(16 * 1024 * 1024)]
+    public async Task<IActionResult> Cniedt([FromForm] IFormFile plantilla, [FromForm] string corte)
+    {
+        if (!(await acceso.Actual(User)).EsNacional)
+            throw new UnauthorizedAccessException("El formato nacional requiere alcance nacional.");
+        var periodo = MesInforme(corte);
+        if (plantilla.Length == 0 || !string.Equals(Path.GetExtension(plantilla.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Seleccione una plantilla .xlsx.");
+        var nacional = await repo.Nacional(periodo.Year);
+        using var entrada = new MemoryStream();
+        await plantilla.CopyToAsync(entrada, HttpContext.RequestAborted);
+        entrada.Position = 0;
+        return File(PlantillaCniedtFese.Llenar(entrada, nacional.Datos, nacional.Cargas, nacional.Entidades, periodo),
+            MimeExcel, $"Formato CNIEDT {periodo:yyyy-MM}.xlsx");
+    }
+
     [HttpGet("usuarios")]
     public async Task<IActionResult> Usuarios()
     {

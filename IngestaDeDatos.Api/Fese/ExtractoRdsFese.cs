@@ -1,0 +1,76 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Text;
+
+namespace IngestaDeDatos.Api.Fese;
+
+internal sealed record FilaRdsFese(string Codigo, string Procedencia, string Region,
+    string Estado, string Centro, string Tipo, string Incidente, long Total, DateTime Periodo, string? MesLargo, string? FechaOriginal);
+
+internal static class ExtractoRdsFese
+{
+    public static async Task<byte[]> Generar(IEnumerable<FilaRdsFese> filas, CancellationToken cancelacion)
+    {
+        var carpeta = Directory.CreateTempSubdirectory("fese-rds-");
+        try
+        {
+            var entrada = Path.Combine(carpeta.FullName, "datos.csv");
+            var salida = Path.Combine(carpeta.FullName, "datos.rds");
+            using (var csv = new StreamWriter(entrada, false, new UTF8Encoding(false)))
+            {
+                await csv.WriteLineAsync("codigo,ao,procedencia,region,estado,centro,tipo,incidente,total,mes,mes_largo,fecha");
+                var cultura = CultureInfo.GetCultureInfo("es-MX");
+                foreach (var fila in filas)
+                {
+                    cancelacion.ThrowIfCancellationRequested();
+                    var mes = cultura.TextInfo.ToTitleCase(cultura.DateTimeFormat.GetMonthName(fila.Periodo.Month));
+                    await csv.WriteLineAsync(string.Join(",", new[]
+                    {
+                        fila.Codigo, fila.Periodo.Year.ToString(CultureInfo.InvariantCulture), fila.Procedencia,
+                        fila.Region, fila.Estado, fila.Centro, fila.Tipo, fila.Incidente,
+                        fila.Total.ToString(CultureInfo.InvariantCulture), fila.Periodo.Month.ToString(CultureInfo.InvariantCulture),
+                        fila.MesLargo ?? mes, fila.FechaOriginal ?? fila.Periodo.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                    }.Select(valor => "\"" + valor.Replace("\"", "\"\"") + "\"")));
+                }
+            }
+
+            var inicio = new ProcessStartInfo(Environment.GetEnvironmentVariable("FESE_RSCRIPT") ?? "Rscript")
+            {
+                UseShellExecute = false
+            };
+            foreach (var argumento in new[] { "--vanilla", "-e", """
+                args <- commandArgs(trailingOnly = TRUE)
+                fese <- read.csv(args[1], fileEncoding = "UTF-8", na.strings = character(),
+                  colClasses = c("character", "numeric", rep("character", 6),
+                                 "numeric", "numeric", "character", "character"))
+                attr(fese, "datalabel") <- ""
+                attr(fese, "var.labels") <- rep("", ncol(fese))
+                saveRDS(fese, args[2], version = 2)
+                """, entrada, salida })
+                inicio.ArgumentList.Add(argumento);
+
+            using var proceso = Process.Start(inicio) ?? throw new InvalidOperationException("No se pudo iniciar Rscript.");
+            using var limite = CancellationTokenSource.CreateLinkedTokenSource(cancelacion);
+            limite.CancelAfter(TimeSpan.FromMinutes(10));
+            try
+            {
+                await proceso.WaitForExitAsync(limite.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                if (!proceso.HasExited) proceso.Kill(entireProcessTree: true);
+                await proceso.WaitForExitAsync();
+                throw;
+            }
+
+            if (proceso.ExitCode != 0)
+                throw new InvalidOperationException("Rscript no pudo generar el extracto FESE.");
+
+            return await File.ReadAllBytesAsync(salida, cancelacion);
+        }
+        finally
+        {
+            carpeta.Delete(recursive: true);
+        }
+    }
+}
